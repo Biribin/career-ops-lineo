@@ -5,6 +5,8 @@
 # suivi) sont rediriges vers un VOLUME persistant via les env CAREER_OPS_* pour
 # survivre aux redeploys (voir DEPLOY-VPS.md).
 #
+# Rebuild marker v2 : forcer Coolify a reconstruire avec CE Dockerfile
+# (il reutilisait l'image du Dockerfile de dev, CMD bash, qui crash-loop).
 # Image slim node+git : suffisant pour le cockpit (suivi, decisions, tracker).
 # Le scan ATS (chromium) et le rendu LaTeX ne sont pas dans cette image v1 ;
 # le CV est rendu par le repo cv (Typst) cote GitHub Actions, pas ici.
