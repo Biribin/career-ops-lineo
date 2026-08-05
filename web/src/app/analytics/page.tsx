@@ -46,8 +46,19 @@ export default function Analytics() {
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="font-display text-2xl tracking-tight text-landing">Statistiques</h1>
-      <p className="mt-1 text-sm text-muted">Sur {total} évaluations suivies.</p>
+      {/* « Répartitions » et non « Statistiques » : les chiffres de référence
+          (envoyées, en attente, refus, taux de réponse) viennent du moteur
+          stats.mjs et vivent sur /stats. Ici on dessine des répartitions
+          calculées côté web — deux titres identiques laisseraient croire à un
+          doublon, ou pire, feraient citer le mauvais chiffre. */}
+      <h1 className="font-display text-2xl tracking-tight text-landing">Répartitions</h1>
+      <p className="mt-1 text-sm text-muted">
+        Sur {total} évaluations suivies. Les chiffres de référence sont sur{" "}
+        <Link href="/stats" className="text-brand hover:underline">
+          Statistiques
+        </Link>
+        .
+      </p>
 
       {/* headline stats */}
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">

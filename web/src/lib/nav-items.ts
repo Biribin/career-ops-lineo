@@ -1,4 +1,4 @@
-import { LayoutDashboard, Compass, History, ListChecks, Send, Radar, BarChart3, FileText, Settings, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Compass, History, ListChecks, Send, Radar, BarChart3, PieChart, FileText, Settings, ShieldCheck } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 
 // Single source of truth for the app's primary destinations — shared by the
@@ -23,7 +23,12 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/relances", label: "Relances dues", icon: Send },
   { href: "/followups", label: "Suivi des relances", icon: History },
   { href: "/portals", label: "Portails", icon: Radar },
-  { href: "/analytics", label: "Statistiques", icon: BarChart3 },
+  // Deux pages, deux rôles : /stats donne les chiffres de référence du moteur
+  // (stats.mjs, les mêmes qu'au terminal), /analytics dessine les répartitions
+  // calculées côté web. Le libellé « Statistiques » va au moteur — c'est lui
+  // qu'on cite.
+  { href: "/stats", label: "Statistiques", icon: BarChart3 },
+  { href: "/analytics", label: "Répartitions", icon: PieChart },
   { href: "/cv", label: "CV", icon: FileText },
   { href: "/config", label: "Configuration", icon: Settings },
 ];
