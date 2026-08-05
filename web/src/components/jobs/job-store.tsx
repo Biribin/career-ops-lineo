@@ -68,7 +68,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const arr = raw ? JSON.parse(raw) : null;
       if (Array.isArray(arr)) {
         // anything left "running" from a previous session is stale → mark interrupted
-        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrupted (page reloaded)", ts: Date.now() }] } : j)));
+        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrompu (page rechargée)", ts: Date.now() }] } : j)));
       }
     } catch {
       /* ignore */
@@ -109,14 +109,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         kind: opts.kind,
         batchId: opts.batchId,
         status: "running",
-        steps: [{ kind: "status", label: "Starting…", ts: Date.now() }],
+        steps: [{ kind: "status", label: "Démarrage…", ts: Date.now() }],
         text: "",
         startedAt: Date.now(),
       };
       setJobs((js) => [job, ...js]);
 
       if (!cliId) {
-        patch(id, (j) => ({ ...j, status: "error", endedAt: Date.now(), steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config", ts: Date.now() }] }));
+        patch(id, (j) => ({ ...j, status: "error", endedAt: Date.now(), steps: [...j.steps, { kind: "status", label: "Aucun CLI configuré — ouvrez la Configuration", ts: Date.now() }] }));
         return id;
       }
 
@@ -160,7 +160,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));
-            finish("error", e.error || "Failed to start");
+            finish("error", e.error || "Échec du démarrage");
             return;
           }
           const reader = res.body.getReader();
@@ -194,7 +194,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   if (typeof ev.tokens === "number") doneTokens = ev.tokens;
                   if (typeof ev.costUsd === "number") doneCostUsd = ev.costUsd;
                 } else if (ev.type === "error") {
-                  finish("error", ev.msg || "Error");
+                  finish("error", ev.msg || "Erreur");
                   return;
                 }
               } catch {
@@ -202,9 +202,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               }
             }
           }
-          finish("done", "Done");
+          finish("done", "Terminé");
         } catch {
-          finish("error", "Connection error");
+          finish("error", "Erreur de connexion");
         }
       })();
 

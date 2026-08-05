@@ -86,10 +86,11 @@ export function ReportView({
   canDelete?: boolean;
 }) {
   const meta = report ? parseReport(report) : null;
+  // Les libellés doivent correspondre à FIELD_KEYS dans lib/format.ts (traduits).
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
   const score = app?.score || field("Score");
   const date = app?.date || field("Date");
-  const archetype = field("Archetype");
+  const archetype = field("Archétype");
   const url = field("URL");
 
   return (
@@ -98,15 +99,15 @@ export function ReportView({
         href="/pipeline"
         className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
       >
-        <ArrowLeft className="size-4" /> Pipeline
+        <ArrowLeft className="size-4" /> Candidatures
       </Link>
 
       <header className="mt-5">
-        <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
+        <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">n° {id}</p>
         <div className="mt-2 flex items-center gap-3">
-          <CompanyLogo name={app?.company ?? meta?.title ?? `Report #${id}`} size={40} />
+          <CompanyLogo name={app?.company ?? meta?.title ?? `Rapport n° ${id}`} size={40} />
           <h1 className="font-display text-3xl tracking-tight text-landing">
-            {app?.company ?? meta?.title ?? `Report #${id}`}
+            {app?.company ?? meta?.title ?? `Rapport n° ${id}`}
           </h1>
         </div>
         {app?.role && <p className="mt-1 text-muted">{app.role}</p>}
@@ -118,7 +119,7 @@ export function ReportView({
           {(() => {
             const n = scoreNum(score ?? "");
             if (Number.isNaN(n)) return null;
-            return n >= 4.0 ? <Badge tone="good">Recommended</Badge> : <Badge tone="muted">Below the apply line</Badge>;
+            return n >= 4.0 ? <Badge tone="good">Recommandée</Badge> : <Badge tone="muted">Sous le seuil de candidature</Badge>;
           })()}
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
           {app && <StatusSelect n={id} current={app.status} />}
@@ -143,7 +144,7 @@ export function ReportView({
                 rel="noreferrer"
                 className="inline-flex items-center justify-center gap-1 text-brand hover:underline max-sm:min-h-[44px]"
               >
-                posting <ExternalLink className="size-3" />
+offre <ExternalLink className="size-3" />
               </a>
             )}
           </div>
@@ -182,7 +183,7 @@ export function ReportView({
 
                 {verdict && (
                   <div className="rounded-2xl border border-brand/25 bg-brand-soft/50 px-5 py-4">
-                    <p className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em] text-brand/80">Verdict</p>
+                    <p className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em] text-brand/80">Verdict</p>{/* identique en français */}
                     <article className="report-prose [&_p]:font-medium [&_p]:text-foreground">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{verdict.content}</ReactMarkdown>
                     </article>
@@ -216,7 +217,7 @@ export function ReportView({
                   <>
                     <div className="mt-6 flex items-center gap-3 text-[11px] uppercase tracking-[0.14em] text-faint">
                       <span className="h-px flex-1 bg-border" />
-                      Technical details · for developers
+                      Détails techniques · pour les développeurs
                       <span className="h-px flex-1 bg-border" />
                     </div>
                     {machine.map((s, i) => (
@@ -240,7 +241,7 @@ export function ReportView({
       ) : (
         <div className="mt-8 flex items-center gap-3 rounded-2xl border border-dashed border-border bg-surface/30 p-5 text-sm text-muted">
           <FileText className="size-5 shrink-0 text-faint" />
-          No report file found for #{id} in <code className="text-foreground">reports/</code>.
+          Aucun fichier de rapport trouvé pour le n° {id} dans <code className="text-foreground">reports/</code>.
         </div>
       )}
     </div>

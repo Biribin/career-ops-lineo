@@ -8,14 +8,15 @@ export default function PortalsPage() {
     <div className="mx-auto max-w-3xl px-6 py-8">
       <div className="flex items-center gap-3">
         <Radar className="size-6 text-brand" />
-        <h1 className="font-display text-2xl tracking-tight text-landing">Portals</h1>
+        <h1 className="font-display text-2xl tracking-tight text-landing">Portails</h1>
       </div>
       <p className="mt-1.5 max-w-xl text-sm text-muted">
-        The companies career-ops watches for new roles. Run a health check to catch company boards that have quietly
-        broken — a broken link means that company silently disappears from every future scan.
+        Les entreprises que career-ops surveille pour détecter les nouveaux postes. Lancez un contrôle de santé pour
+        repérer les pages carrières cassées sans bruit — un lien mort, et cette entreprise disparaît silencieusement de
+        tous les scans suivants.
       </p>
       <p className="mt-1.5 text-xs text-faint">
-        Backed by <code className="text-muted">portals.yml</code> — edit it directly or ask the assistant.
+        Alimenté par <code className="text-muted">portals.yml</code> — modifiez-le directement ou demandez à l'assistant.
       </p>
       <div className="mt-6">
         <PortalsView />

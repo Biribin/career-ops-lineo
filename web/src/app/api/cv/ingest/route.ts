@@ -78,7 +78,7 @@ export async function POST(req: Request) {
       // Reading a PDF/DOCX from a path needs the CLI's file tool, which only Claude
       // is granted here. Tell non-Claude users plainly instead of failing opaquely.
       if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
-        return Response.json({ error: "PDF upload needs Claude Code — paste your CV text instead." }, { status: 400 });
+        return Response.json({ error: "Le téléversement de PDF nécessite Claude Code — collez plutôt le texte de votre CV." }, { status: 400 });
       }
       const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".pdf").toLowerCase();
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-cv-"));
@@ -122,7 +122,7 @@ export async function POST(req: Request) {
     child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
   } catch (e) {
     if (tempFile) cleanupTemp(tempFile); // never leak the CV temp if spawn throws sync
-    return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
+    return Response.json({ error: e instanceof Error ? e.message : "échec du démarrage du CLI" }, { status: 500 });
   }
 
   const encoder = new TextEncoder();

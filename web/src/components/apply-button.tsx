@@ -23,10 +23,10 @@ export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: st
       <button
         type="button"
         disabled
-        title={!hasUrl ? "No application URL on this report" : "Generate the tailored CV (PDF) first to apply"}
+        title={!hasUrl ? "Aucune URL de candidature sur ce rapport" : "Générez d'abord le CV adapté (PDF) pour candidater"}
         className="inline-flex cursor-not-allowed items-center justify-center gap-1.5 rounded-full border border-border bg-surface/40 px-3.5 py-1 text-xs font-medium text-faint max-sm:min-h-[44px]"
       >
-        <Lock className="size-3.5" /> Apply
+        <Lock className="size-3.5" /> Candidater
       </button>
     );
   }
@@ -38,9 +38,9 @@ export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: st
         router.push("/apply");
       }}
       className="inline-flex items-center justify-center gap-1.5 rounded-full bg-brand px-3.5 py-1 text-xs font-medium text-brand-foreground shadow-sm transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
-      title="Apply — opens the form pre-filled, you review and submit yourself"
+      title="Candidater — ouvre le formulaire prérempli, vous relisez et envoyez vous-même"
     >
-      <Send className="size-3.5" /> Apply
+      <Send className="size-3.5" /> Candidater
     </button>
   );
 }

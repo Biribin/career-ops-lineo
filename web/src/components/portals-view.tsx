@@ -10,11 +10,12 @@ import { cn } from "@/lib/cn";
 type Company = { name: string; status: string; detail: string };
 type Result = { available: boolean; configured: boolean; companies: Company[] };
 
+// Les CLÉS sont les statuts renvoyés par /api/portals/verify — jamais traduites.
 const TONE: Record<string, { dot: string; label: string; chip: string }> = {
-  live: { dot: "bg-emerald-500", label: "live", chip: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
-  empty: { dot: "bg-amber-500", label: "live · empty", chip: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
-  broken: { dot: "bg-red-500", label: "broken", chip: "bg-red-500/15 text-red-700 dark:text-red-400" },
-  skipped: { dot: "bg-zinc-400", label: "no ATS", chip: "bg-surface-hover text-muted" },
+  live: { dot: "bg-emerald-500", label: "active", chip: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
+  empty: { dot: "bg-amber-500", label: "active · vide", chip: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
+  broken: { dot: "bg-red-500", label: "cassée", chip: "bg-red-500/15 text-red-700 dark:text-red-400" },
+  skipped: { dot: "bg-zinc-400", label: "sans ATS", chip: "bg-surface-hover text-muted" },
 };
 const ORDER: Record<string, number> = { broken: 0, empty: 1, live: 2, skipped: 3 };
 
@@ -57,39 +58,39 @@ export function PortalsView() {
           className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-50 max-sm:min-h-[44px]"
         >
           {loading ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-4" />}
-          Check portal health
+          Contrôler la santé des portails
         </button>
-        {loading && <span className="text-xs text-faint">Probing each company&apos;s ATS… (~30–60s)</span>}
+        {loading && <span className="text-xs text-faint">Test de l&apos;ATS de chaque entreprise… (~30–60 s)</span>}
       </div>
 
       {res && !res.available && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-          <code className="text-foreground">verify-portals.mjs</code> not found — this needs a complete career-ops
-          checkout (the web orchestrates the core&apos;s validator).
+          <code className="text-foreground">verify-portals.mjs</code> introuvable — cela nécessite une installation
+          career-ops complète (l&apos;interface web orchestre le validateur du cœur).
         </p>
       )}
       {res && res.available && !res.configured && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-          No <code className="text-foreground">portals.yml</code> yet — ask the assistant to set up the companies to scan.
+          Pas encore de <code className="text-foreground">portals.yml</code> — demandez à l&apos;assistant de définir les entreprises à scanner.
         </p>
       )}
 
       {res && res.configured && (
         <div className="mt-5">
           <p className="text-sm text-muted">
-            <span className="tabular-nums text-emerald-600 dark:text-emerald-400">{liveN}</span> live ·{" "}
-            <span className="tabular-nums text-red-600 dark:text-red-400">{broken.length}</span> broken ·{" "}
-            <span className="tabular-nums">{companies.length}</span> tracked
+            <span className="tabular-nums text-emerald-600 dark:text-emerald-400">{liveN}</span> actives ·{" "}
+            <span className="tabular-nums text-red-600 dark:text-red-400">{broken.length}</span> cassées ·{" "}
+            <span className="tabular-nums">{companies.length}</span> suivies
           </p>
           {broken.length > 0 && (
             <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm">
               <span className="font-medium text-red-700 dark:text-red-400">
-                {broken.length} {broken.length === 1 ? "company silently drops" : "companies silently drop"} from every
-                scan
+                {broken.length} entreprise{broken.length === 1 ? "" : "s"} disparaî{broken.length === 1 ? "t" : "ssent"}{" "}
+                silencieusement de chaque scan
               </span>{" "}
               <span className="text-muted">
-                — their careers link is broken. Fix the <code>careers_url</code> in <code>portals.yml</code> (or ask the
-                assistant to repair them).
+                — leur lien carrières est cassé. Corrigez <code>careers_url</code> dans <code>portals.yml</code> (ou
+                demandez à l&apos;assistant de les réparer).
               </span>
             </div>
           )}
@@ -103,7 +104,7 @@ export function PortalsView() {
                   <span className="shrink-0 text-sm font-medium">{c.name}</span>
                   <span className="truncate font-mono text-xs text-faint">{c.detail}</span>
                   <div className="ml-auto flex shrink-0 items-center gap-2">
-                    {c.status === "broken" && <FixAffordance company={c.name} job={fixByCompany.get(c.name)} onFix={() => startJob({ title: `Fix · ${c.name}`, subtitle: "repair portal slug", kind: "fix-portal", input: c.name, page: "/portals" })} />}
+                    {c.status === "broken" && <FixAffordance company={c.name} job={fixByCompany.get(c.name)} onFix={() => startJob({ title: `Réparation · ${c.name}`, subtitle: "corriger l'identifiant du portail", kind: "fix-portal", input: c.name, page: "/portals" })} />}
                     <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", t.chip)}>{t.label}</span>
                   </div>
                 </li>
@@ -120,22 +121,22 @@ function FixAffordance({ company, job, onFix }: { company: string; job?: Job; on
   if (job?.status === "running")
     return (
       <Link href={`/jobs/${job.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand">
-        <Loader2 className="size-3 animate-spin" /> Fixing…
+        <Loader2 className="size-3 animate-spin" /> Réparation…
       </Link>
     );
   if (job?.status === "done")
     return (
       <Link href={`/jobs/${job.id}`} className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-        repaired · re-check
+        réparée · re-tester
       </Link>
     );
   return (
     <button
       onClick={onFix}
-      title={`Have the agent repair ${company}'s portal slug`}
+      title={`Demander à l'agent de corriger l'identifiant de portail de ${company}`}
       className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand"
     >
-      <Wrench className="size-3" /> Fix
+      <Wrench className="size-3" /> Réparer
     </button>
   );
 }

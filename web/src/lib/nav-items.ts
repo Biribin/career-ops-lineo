@@ -1,4 +1,4 @@
-import { LayoutDashboard, Compass, ListChecks, Send, Radar, BarChart3, FileText, Settings } from "lucide-react";
+import { LayoutDashboard, Compass, ListChecks, Send, Radar, BarChart3, FileText, Settings, ShieldCheck } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 
 // Single source of truth for the app's primary destinations — shared by the
@@ -10,15 +10,18 @@ export type NavItem = {
   chip?: string;
 };
 
+// Les `href` sont des routes (noms de fichiers) — jamais traduits. Seuls les
+// libellés sont user-facing.
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "Today", icon: LayoutDashboard },
-  { href: "/explore", label: "Explore", icon: Compass, chip: "New" },
-  { href: "/pipeline", label: "Pipeline", icon: ListChecks },
-  { href: "/followups", label: "Follow-ups", icon: Send },
-  { href: "/portals", label: "Portals", icon: Radar },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/", label: "Aujourd'hui", icon: LayoutDashboard },
+  { href: "/explore", label: "Explorer", icon: Compass, chip: "Nouveau" },
+  { href: "/a-valider", label: "À valider", icon: ShieldCheck },
+  { href: "/pipeline", label: "Candidatures", icon: ListChecks },
+  { href: "/followups", label: "Relances", icon: Send },
+  { href: "/portals", label: "Portails", icon: Radar },
+  { href: "/analytics", label: "Statistiques", icon: BarChart3 },
   { href: "/cv", label: "CV", icon: FileText },
-  { href: "/config", label: "Config", icon: Settings },
+  { href: "/config", label: "Configuration", icon: Settings },
 ];
 
 export function isActivePath(href: string, pathname: string): boolean {

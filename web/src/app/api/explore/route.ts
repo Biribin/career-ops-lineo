@@ -23,7 +23,8 @@ export async function POST(req: NextRequest) {
   // Guard: a data-only checkout (or pre-onboarding) has no scanner. Fail soft.
   if (!fs.existsSync(rootScript("scan-ats-full"))) {
     return Response.json(
-      { error: "The discovery scanner isn't available in this checkout yet." },
+      // ⚠️ Formulation reconnue par le test scannerMissing d'explorer-view.tsx.
+      { error: "Le scanner de découverte n'est pas encore disponible dans cette installation." },
       { status: 400 },
     );
   }

@@ -65,7 +65,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="mt-auto space-y-3 pt-4">
             <UsageMeter />
             <div className="flex items-center justify-between px-1">
-              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+              <span className={`${instrumentSerif.className} text-sm text-faint`}>en local · v0</span>
               <ThemeToggle />
             </div>
           </div>

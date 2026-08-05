@@ -56,6 +56,39 @@ export function canonStatus(s: string): string {
   return STATUS_ALIAS[k] ?? s.toUpperCase();
 }
 
+/** The canonical tracker tokens, derived from CANONICAL_STATES so the two can
+ *  never drift ("Applied" → "APPLIED", the form canonStatus() returns). */
+type CanonicalStateToken = Uppercase<(typeof CANONICAL_STATES)[number]>;
+
+/**
+ * French DISPLAY labels for the canonical states. Display only — the canonical
+ * English token stays the value we read from and write back to the tracker
+ * (normalize-statuses.mjs owns that vocabulary). Never send these to /api/status.
+ *
+ * ⚠️ Typed EXHAUSTIVELY against CANONICAL_STATES on purpose: when an upstream
+ * merge adds a new state, this object stops compiling instead of silently
+ * rendering the new state in English. Add the French label here — don't widen
+ * the type back to Record<string, string>.
+ */
+const STATUS_LABEL_FR: Record<CanonicalStateToken, string> = {
+  EVALUATED: "Évaluée",
+  APPLIED: "Envoyée",
+  RESPONDED: "Réponse reçue",
+  INTERVIEW: "Entretien",
+  OFFER: "Proposition",
+  HIRED: "Embauché",
+  REJECTED: "Refusée",
+  DISCARDED: "Écartée",
+  SKIP: "À ignorer",
+};
+
+/** Canonical status (label/id/alias) → French label for display. Falls back to
+ *  the raw value so unknown LEGACY tracker statuses stay visible verbatim (that
+ *  fallback is for pre-existing data, never a substitute for a missing label). */
+export function statusLabel(status: string): string {
+  return (STATUS_LABEL_FR as Record<string, string>)[canonStatus(status)] ?? status;
+}
+
 /** Status dot colour, mirroring the Go TUI: green hired/interview/offer, sky
  *  applied/responded, red skip/rejected, gray discarded, neutral evaluated. */
 export function statusDot(status: string): string {
@@ -108,17 +141,24 @@ export type ReportMeta = {
   body: string;
 };
 
+// Raw report key (any language the reports were written in) → French display
+// label. The LEFT side is parsing vocabulary and must keep matching the existing
+// report files; only the right side is user-facing.
 const FIELD_KEYS: Record<string, string> = {
   date: "Date",
   fecha: "Date",
   url: "URL",
-  archetype: "Archetype",
-  arquetipo: "Archetype",
+  archetype: "Archétype",
+  arquetipo: "Archétype",
   score: "Score",
-  legitimacy: "Legitimacy",
-  legitimidad: "Legitimacy",
+  legitimacy: "Légitimité",
+  legitimidad: "Légitimité",
   pdf: "PDF",
 };
+
+/** Display label of the legitimacy field, kept as a constant so the parser can
+ *  recognise it without depending on the wording. */
+const LEGITIMACY_LABEL = "Légitimité";
 
 /**
  * Tolerant report parser (per maintainer: adapt the render, don't migrate the
@@ -152,7 +192,7 @@ export function parseReport(md: string): ReportMeta {
     const label = FIELD_KEYS[m[1].trim().toLowerCase()];
     const value = m[2].trim();
     if (!label || !value) continue;
-    if (label === "Legitimacy") legitimacy = value;
+    if (label === LEGITIMACY_LABEL) legitimacy = value;
     fields.push({ label, value });
   }
 

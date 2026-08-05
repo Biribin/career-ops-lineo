@@ -7,11 +7,19 @@ export type CvReadiness = { scoreable: boolean; words: number; hasExperience: bo
 export function cvReadiness(md: string): CvReadiness {
   const text = (md || "").trim();
   const words = text ? text.split(/\s+/).length : 0;
-  const hasExperience = /(^|\n)#{1,3}\s*(experience|work|employment|empleo|experiencia)/i.test(text) || /\b(20\d\d)\s*[-–—]\s*(20\d\d|present|now|actualidad)/i.test(text);
-  const hasSkills = /(^|\n)#{1,3}\s*(skills|technologies|competenc|habilidad)/i.test(text);
+  // Les mots-clés FR sont ajoutés aux détections : le CV lu est en français, sinon
+  // le badge « Prêt à être comparé » ne s'allumerait jamais.
+  const hasExperience =
+    /(^|\n)#{1,3}\s*(experience|expérience|work|employment|empleo|experiencia|parcours|postes?)/i.test(text) ||
+    /\b(20\d\d)\s*[-–—]\s*(20\d\d|present|now|actualidad|présent|aujourd'hui)/i.test(text);
+  const hasSkills = /(^|\n)#{1,3}\s*(skills|technologies|competenc|compétences|habilidad)/i.test(text);
   const scoreable = words >= 80 && (hasExperience || hasSkills || words >= 200);
   let hint: string | undefined;
-  if (!scoreable) hint = words < 40 ? "That's very short — add your experience for real matches (you can save anyway)." : "Looks thin — add a role or two for better matches (you can save anyway).";
+  if (!scoreable)
+    hint =
+      words < 40
+        ? "C'est très court — ajoutez votre expérience pour de vraies correspondances (vous pouvez enregistrer quand même)."
+        : "Ça paraît léger — ajoutez un poste ou deux pour de meilleures correspondances (vous pouvez enregistrer quand même).";
   return { scoreable, words, hasExperience, hasSkills, hint };
 }
 
