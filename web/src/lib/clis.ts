@@ -161,6 +161,16 @@ function geminiArgsFor(kind: string): (prompt: string) => string[] {
   return (p: string) => [...approval, "-p", p];
 }
 
+// Antigravity CLI (`agy`) auto-approval per task kind — same intent as Gemini's:
+// read-only research → plan; pdf edits → accept-edits; evaluate/fix-portal need
+// the shell → skip all permission prompts. Otherwise headless `agy` stalls waiting
+// for an approval nobody is present to grant.
+function antigravityArgsFor(kind: string): (prompt: string) => string[] {
+  const approval =
+    kind === "research" ? ["--mode", "plan"] : kind === "pdf" ? ["--mode", "accept-edits"] : ["--dangerously-skip-permissions"];
+  return (p: string) => [...approval, "-p", p];
+}
+
 // Ordered resilience chain: the CLI saved in Configuration first, then Gemini's
 // free tiers as fallbacks (AGENTS.md: career-ops runs best on Claude Code; Gemini
 // free tiers are the safety net). Each attempt is tried in order until one
@@ -199,10 +209,7 @@ export function buildChain(primaryCliId: string, kind: string): Runner[] {
   // (Google-account, no key) whenever it's installed.
   const agyBin = findBin("agy");
   if (agyBin) {
-    const agy = KNOWN.find((c) => c.id === "antigravity");
-    if (agy) {
-      add({ id: "antigravity", cliId: "antigravity", label: "Antigravity · compte Google", binPath: agyBin, args: agy.args });
-    }
+    add({ id: "antigravity", cliId: "antigravity", label: "Antigravity · compte Google", binPath: agyBin, args: antigravityArgsFor(kind) });
   }
 
   const geminiBin = findBin("gemini");
