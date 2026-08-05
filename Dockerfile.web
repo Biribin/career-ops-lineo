@@ -13,11 +13,21 @@
 
 FROM node:22-bookworm-slim
 
-# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD : les deps racine tirent playwright ; on evite
-# le telechargement du navigateur (~500 Mo) inutile pour le cockpit v1.
+# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD : neutralise le postinstall du PAQUET
+# playwright. Le postinstall du DEPOT (package.json) lance ensuite
+# `playwright install chromium --with-deps` explicitement : chromium est donc bien
+# present (verifie sur le VPS : `node doctor.mjs` -> "Playwright chromium installed").
+#
+# CAREER_OPS_CLI + GEMINI_* : la voie LLM par DEFAUT du VPS est GRATUITE et
+# autonome (Gemini CLI + cle AI Studio free tier), pas Claude Max. Voir la section
+# « Quel LLM fait tourner le VPS » de DEPLOY-VPS.md pour l'arbitrage.
+# La CLE n'est PAS ici : GEMINI_API_KEY vient des variables d'env Coolify.
 ENV PORT=3000 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    CAREER_OPS_CLI=gemini \
+    GEMINI_DEFAULT_AUTH_TYPE=gemini-api-key \
+    GEMINI_CLI_TRUST_WORKSPACE=true
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates tini \
@@ -26,7 +36,17 @@ RUN apt-get update \
 # Claude Code CLI : l'app le lance en headless (route /api/explore/ai) pour la
 # recherche IA, avec l'abonnement Max de Lineo via CLAUDE_CODE_OAUTH_TOKEN (env
 # Coolify) + CAREER_OPS_CLI=claude. Sans ce binaire, resolveCli('claude') echoue.
+# NOTE : installe mais PAS le defaut (voir CAREER_OPS_CLI plus haut) — un headless
+# VPS sur abonnement Max consomme les quotas d'un compte peut-etre partage.
 RUN npm install -g @anthropic-ai/claude-code
+
+# Gemini CLI : LA voie gratuite et autonome du VPS. web/src/lib/clis.ts fait
+# tourner un CLI agentique REEL pour /api/run (evaluate, pdf, fix-portal) — sans
+# binaire de CLI dans l'image, /api/run repond 404 « CLI not found ». Version
+# epinglee sur la mineure verifiee (0.53.x) : clis.ts passe
+# `--approval-mode plan|auto_edit` et `--yolo`, des flags que cette ligne supporte.
+RUN npm install -g "@google/gemini-cli@^0.53" \
+ && gemini --version
 
 WORKDIR /app
 

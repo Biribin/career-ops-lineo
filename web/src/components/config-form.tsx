@@ -67,8 +67,11 @@ export function ConfigForm() {
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
         setClis(list);
-        // auto-select first installed if nothing chosen yet
-        setCliId((prev) => prev || list.find((c) => c.installed)?.id || "");
+        // Nothing chosen yet → the deployment's own default (CAREER_OPS_CLI, only
+        // returned when installed) wins over "first installed in the list". On the
+        // VPS both Claude Code and the Gemini CLI are installed, and the free
+        // Gemini tier is the intended default — list order must not decide that.
+        setCliId((prev) => prev || d.defaultCliId || list.find((c) => c.installed)?.id || "");
       })
       .catch(() => setClis([]));
   }, []);
