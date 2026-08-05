@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { inboxDir, journalPath } from "@/lib/n8n-decisions";
+import { trackCompanyInPortals, type PortailTrackResult } from "@/lib/portals-track";
 import {
   ajouterAuJournal,
   dejaClose,
@@ -197,6 +198,19 @@ export async function POST(req: Request) {
     n8nError = e instanceof Error ? e.message : "POST vers n8n impossible";
   }
 
+  // 2 bis) Valider => la candidature part chez n8n. On ajoute alors l'entreprise
+  // aux Portails suivis (tracked_companies) pour que career-ops la surveille.
+  // NON bloquant : le mail est déjà relancé, un échec d'écriture n'annule rien —
+  // on le remonte dans le journal + la réponse. Uniquement si n8n a bien accepté.
+  let portail: PortailTrackResult | null = null;
+  if (dec === "valider" && n8nStatus != null && n8nStatus < 400) {
+    try {
+      portail = trackCompanyInPortals(String(fiche.entreprise ?? ""), String(fiche.url_offre ?? ""));
+    } catch (e) {
+      portail = { applique: false, deja: false, erreur: e instanceof Error ? e.message : "ajout aux portails impossible" };
+    }
+  }
+
   // 3) Journal, quel que soit le résultat : c'est la trace d'audit.
   const entree = {
     id,
@@ -209,6 +223,9 @@ export async function POST(req: Request) {
     n8nError,
     trackerApplique: dec === "refuser" ? tracker.applique : undefined,
     trackerErreur: dec === "refuser" ? tracker.erreur : undefined,
+    portailApplique: dec === "valider" ? portail?.applique : undefined,
+    portailDeja: dec === "valider" ? portail?.deja : undefined,
+    portailErreur: dec === "valider" ? portail?.erreur ?? undefined : undefined,
   };
   let journalErreur: string | null = null;
   try {
@@ -225,6 +242,7 @@ export async function POST(req: Request) {
       n8nStatus,
       n8nError,
       tracker: dec === "refuser" ? tracker : null,
+      portail: dec === "valider" ? portail : null,
       journalErreur,
     },
     { status: ok ? 200 : 502 },
