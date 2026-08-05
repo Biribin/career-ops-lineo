@@ -110,3 +110,56 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
 }
 
 export { listFrom as normalizeKeywords };
+
+/**
+ * Les filtres de portals.yml AU COMPLET, sans le plafond de 16 « chips ».
+ *
+ * `seedExploreFilters()` ne convient PAS pour ça : il passe par `cleanChips`, qui
+ * coupe à 16 entrées (CHIP_CAP) parce qu'il alimente une rangée de chips
+ * éditables dans l'Explorateur. Les 42 mots-clés de Linéo y perdent les 26
+ * derniers — dont « Integration Engineer », « AI Automation », « Solutions
+ * Engineer », « Ingénieur IA », c'est-à-dire les plus spécifiques, ceux qui
+ * distinguent une offre vraiment ciblée d'une offre qui dit juste « AI ».
+ * Acceptable pour préremplir un formulaire ; inacceptable pour CLASSER, où la
+ * troncature ferait silencieusement disparaître le signal le plus fin.
+ *
+ * Même nettoyage que `cleanChips` (trim, vide et ponctuation seule écartés,
+ * dédoublonnage insensible à la casse) mais SANS plafond.
+ */
+export function lireFiltresPortals(): {
+  positive: string[];
+  negative: string[];
+  allow: string[];
+  block: string[];
+  alwaysAllow: string[];
+} {
+  const vide = { positive: [], negative: [], allow: [], block: [], alwaysAllow: [] };
+  const doc = loadYaml("portals.yml");
+  if (!doc) return vide;
+
+  const liste = (v: unknown): string[] => {
+    const arr = Array.isArray(v) ? v : v == null ? [] : [v];
+    const vus = new Set<string>();
+    const out: string[] = [];
+    for (const item of arr) {
+      if (typeof item !== "string") continue;
+      const k = item.trim();
+      if (!k || !/[\p{L}\p{N}]/u.test(k)) continue;
+      const cle = k.toLowerCase();
+      if (vus.has(cle)) continue;
+      vus.add(cle);
+      out.push(k);
+    }
+    return out;
+  };
+
+  const tf = (doc.title_filter ?? {}) as Record<string, unknown>;
+  const lf = (doc.location_filter ?? {}) as Record<string, unknown>;
+  return {
+    positive: liste(tf.positive),
+    negative: liste(tf.negative),
+    allow: liste(lf.allow),
+    block: liste(lf.block),
+    alwaysAllow: liste(lf.always_allow),
+  };
+}
