@@ -92,12 +92,19 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const startJob = useCallback(
     (opts: StartOpts): string | null => {
-      let cliId: string | null = null;
+      // Default to Claude Code when the user hasn't saved a CLI yet — career-ops
+      // runs best on the Claude account, and the run route's resilience chain
+      // (buildChain) falls back to Gemini's free tiers if Claude isn't installed
+      // or fails. So a fresh setup "just uses Claude" instead of dead-ending on a
+      // "no CLI configured" error; if truly nothing is installed, /api/run answers
+      // with a clear error that surfaces below.
+      let cliId = "claude";
       try {
         const raw = localStorage.getItem(CONFIG_KEY);
-        cliId = raw ? JSON.parse(raw).cliId || null : null;
+        const saved = raw ? JSON.parse(raw).cliId : null;
+        if (typeof saved === "string" && saved) cliId = saved;
       } catch {
-        cliId = null;
+        /* keep the Claude default */
       }
       const id = `job-${Date.now()}-${seq.current++}`;
       const job: Job = {
@@ -114,11 +121,6 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         startedAt: Date.now(),
       };
       setJobs((js) => [job, ...js]);
-
-      if (!cliId) {
-        patch(id, (j) => ({ ...j, status: "error", endedAt: Date.now(), steps: [...j.steps, { kind: "status", label: "Aucun CLI configuré — ouvrez la Configuration", ts: Date.now() }] }));
-        return id;
-      }
 
       (async () => {
         let text = "";

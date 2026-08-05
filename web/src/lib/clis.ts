@@ -97,3 +97,135 @@ export function resolveCli(id: string): { spec: CliSpec; binPath: string } | nul
   if (!binPath) return null;
   return { spec, binPath };
 }
+
+// Windows can't `child_process.spawn()` an extensionless npm/sh shim (e.g. the
+// bare `claude` / `gemini-rotate` scripts findBin returns) or a `.cmd` without a
+// shell — and shell:true mangles the multi-line prompt arg. Resolve each known
+// CLI's REAL executable (claude ships a native .exe) or the node entry script it
+// wraps (gemini, gemini-rotate) and run THAT directly: clean arg passing, no shell.
+// POSIX (and any resolved .exe) spawns the bin as-is.
+export function spawnTarget(binPath: string): { file: string; prefixArgs: string[] } {
+  if (process.platform !== "win32") return { file: binPath, prefixArgs: [] };
+  if (/\.(exe|com)$/i.test(binPath)) return { file: binPath, prefixArgs: [] };
+
+  const dir = path.dirname(binPath);
+  const base = path.basename(binPath).replace(/\.(cmd|bat|ps1|exe)$/i, "").toLowerCase();
+
+  if (base === "claude") {
+    const exe = path.join(dir, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
+    if (fs.existsSync(exe)) return { file: exe, prefixArgs: [] };
+  }
+  if (base === "gemini-rotate") {
+    const entry = path.join(os.homedir(), ".gemini", "rotate.mjs");
+    if (fs.existsSync(entry)) return { file: process.execPath, prefixArgs: [entry] };
+  }
+  if (base === "gemini") {
+    const entry = path.join(dir, "node_modules", "@google", "gemini-cli", "bundle", "gemini.js");
+    if (fs.existsSync(entry)) return { file: process.execPath, prefixArgs: [entry] };
+  }
+
+  // Fallback for other CLIs: a sibling .exe if present, else the .cmd via cmd.exe
+  // (Node escapes the args; shell:false avoids a second cmd re-parse). Multi-line
+  // args through cmd.exe are best-effort — the known CLIs above avoid it entirely.
+  const siblingExe = path.join(dir, `${base}.exe`);
+  if (fs.existsSync(siblingExe)) return { file: siblingExe, prefixArgs: [] };
+  const cmd = path.join(dir, `${base}.cmd`);
+  if (fs.existsSync(cmd)) return { file: process.env.ComSpec || "cmd.exe", prefixArgs: ["/d", "/s", "/c", cmd] };
+  return { file: binPath, prefixArgs: [] };
+}
+
+// A single concrete attempt the run route can spawn. The resilience chain is an
+// ordered list of these: each is tried until one produces a clean, real result.
+export type Runner = {
+  /** unique attempt id (also the analytics label) */
+  id: string;
+  /** the KNOWN cli this maps to — drives Claude-specific arg handling */
+  cliId: string;
+  /** human-readable label shown in the progress stream */
+  label: string;
+  /** resolved executable path */
+  binPath: string;
+  /** headless invocation args for a single prompt */
+  args: (prompt: string) => string[];
+  /** extra env for THIS attempt; a key mapped to undefined is DELETED from the child env */
+  env?: Record<string, string | undefined>;
+};
+
+// Gemini auto-approval per task kind — mirrors the per-kind tool scoping the
+// route hands Claude (read-only research → plan; pdf edits only → auto_edit;
+// evaluate/fix-portal need the shell → yolo). Without this, headless Gemini would
+// stall waiting for an approval nobody is present to grant.
+function geminiArgsFor(kind: string): (prompt: string) => string[] {
+  const approval =
+    kind === "research" ? ["--approval-mode", "plan"] : kind === "pdf" ? ["--approval-mode", "auto_edit"] : ["--yolo"];
+  return (p: string) => [...approval, "-p", p];
+}
+
+// Ordered resilience chain: the CLI saved in Configuration first, then Gemini's
+// free tiers as fallbacks (AGENTS.md: career-ops runs best on Claude Code; Gemini
+// free tiers are the safety net). Each attempt is tried in order until one
+// produces a clean, real result. Entries whose binary isn't installed are skipped.
+//   1. <primary>    — the CLI saved in Configuration (usually Claude Code / the Claude account)
+//   2. antigravity  — Antigravity CLI (Google-account free tier), ONLY if `agy` is installed
+//                     (replaces Gemini's retired "Sign in with Google" path)
+//   3. gemini-keys  — Gemini via API keys; uses the `gemini-rotate` wrapper (10-key pool, auto-rotates on quota) when installed
+export function buildChain(primaryCliId: string, kind: string): Runner[] {
+  const chain: Runner[] = [];
+  const seen = new Set<string>();
+  const add = (r: Runner | null) => {
+    if (r && !seen.has(r.id)) {
+      seen.add(r.id);
+      chain.push(r);
+    }
+  };
+  const geminiArgs = geminiArgsFor(kind);
+
+  const primary = resolveCli(primaryCliId);
+  if (primary) {
+    add({
+      id: primaryCliId,
+      cliId: primaryCliId,
+      label: primary.spec.name,
+      binPath: primary.binPath,
+      args: primaryCliId === "gemini" ? geminiArgs : primary.spec.args,
+    });
+  }
+
+  // Google-account free tier: Gemini's individual "Sign in with Google" (Code
+  // Assist) path was RETIRED by Google — the CLI now answers "This client is no
+  // longer supported for Gemini Code Assist for individuals… migrate to
+  // Antigravity", so it is NOT a usable tier and is deliberately omitted.
+  // Antigravity CLI (`agy`) is Google's replacement free tier — slot it in here
+  // (Google-account, no key) whenever it's installed.
+  const agyBin = findBin("agy");
+  if (agyBin) {
+    const agy = KNOWN.find((c) => c.id === "antigravity");
+    if (agy) {
+      add({ id: "antigravity", cliId: "antigravity", label: "Antigravity · compte Google", binPath: agyBin, args: agy.args });
+    }
+  }
+
+  const geminiBin = findBin("gemini");
+  const rotateBin = findBin("gemini-rotate");
+  if (rotateBin) {
+    add({
+      id: "gemini-keys",
+      cliId: "gemini",
+      label: "Gemini · clés API (rotation)",
+      binPath: rotateBin,
+      args: geminiArgs,
+      env: { GEMINI_CLI_TRUST_WORKSPACE: "true" },
+    });
+  } else if (geminiBin) {
+    add({
+      id: "gemini-keys",
+      cliId: "gemini",
+      label: "Gemini · clé API",
+      binPath: geminiBin,
+      args: geminiArgs,
+      env: { GEMINI_DEFAULT_AUTH_TYPE: "gemini-api-key", GEMINI_CLI_TRUST_WORKSPACE: "true" },
+    });
+  }
+
+  return chain;
+}
