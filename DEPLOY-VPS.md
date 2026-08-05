@@ -9,8 +9,28 @@ n8n, sur le même serveur. Domaine cible : **career.balzac-info.online**.
   les `.mjs`). Image slim node+git. Build de prod **vérifié en local** (101 routes,
   0 erreur).
 - `.dockerignore` — exclut `data/` (records → volume persistant), `node_modules`,
-  `web/.next`. La config (`cv.md`, `config/`, `portals.yml`, `modes/_profile.md`)
-  est embarquée dans l'image v1.
+  `web/.next`.
+
+## ⚠️ La couche utilisateur n'est PAS dans l'image
+
+Une version antérieure de ce document affirmait que `cv.md`, `config/`,
+`portals.yml` et `modes/_profile.md` étaient « embarqués dans l'image v1 ».
+**C'est faux, et ça se voit en production** (constaté le 2026-08-05 : `POST
+/api/tailor` répondait 503 `cv.md introuvable`).
+
+Ces fichiers sont **gitignorés** (`.gitignore` : `cv.md` l.2, `config/profile.yml`
+l.57, `data/*` l.9). Coolify construit depuis un **clone git** : ce que git ignore
+n'est jamais dans le contexte de build, quoi que dise `.dockerignore`. Il faut donc
+les fournir au conteneur autrement — c'est le rôle de `docker-entrypoint-web.sh`
+(volume persistant + liens dans `/app`). Ils sont par ailleurs sauvegardés dans
+**`Biribin/career-ops-data`** (privé, sync quotidien 12:30).
+
+À l'inverse, **`data/applications.md` absent n'est PAS un problème à régler.** Le
+tracker se crée à la première candidature réellement envoyée (`merge-tracker.mjs`),
+et `/app/data` étant déjà le volume, il est persistant sans rien câbler. Tant qu'il
+n'existe pas, `GET /api/followups` répond correctement
+`{"due":[],"error":"No applications found in tracker."}` : c'est l'état normal
+d'avant-premier-envoi, pas une panne de provisioning.
 
 ## Réglages Coolify (New Resource → Application)
 
