@@ -18,14 +18,22 @@ FROM node:22-bookworm-slim
 # `playwright install chromium --with-deps` explicitement : chromium est donc bien
 # present (verifie sur le VPS : `node doctor.mjs` -> "Playwright chromium installed").
 #
-# CAREER_OPS_CLI + GEMINI_* : la voie LLM par DEFAUT du VPS est GRATUITE et
-# autonome (Gemini CLI + cle AI Studio free tier), pas Claude Max. Voir la section
-# « Quel LLM fait tourner le VPS » de DEPLOY-VPS.md pour l'arbitrage.
-# La CLE n'est PAS ici : GEMINI_API_KEY vient des variables d'env Coolify.
+# CAREER_OPS_CLI : le CLI par DEFAUT du VPS est Claude Code (arbitrage Lineo,
+# 2026-08-05). Le defaut precedent etait `gemini` mais il ne marchait pas : la
+# variable GEMINI_API_KEY contenait plusieurs cles separees par des virgules, un
+# format que RIEN ne sait lire cote serveur (gemini-eval.mjs passe la valeur
+# verbatim, le CLI attend une valeur unique). Voir la section « Quel LLM fait
+# tourner le VPS » de DEPLOY-VPS.md pour l'arbitrage complet, y compris l'ordre
+# imperatif : SUPPRIMER ANTHROPIC_API_KEY des variables Coolify avant de deployer
+# ce defaut, sinon le chemin par defaut devient une voie FACTUREE au token au lieu
+# de l'abonnement (CLAUDE_CODE_OAUTH_TOKEN).
+#
+# Les GEMINI_* restent : le CLI Gemini est garde en repli, il suffit d'une seule
+# cle dans GEMINI_API_KEY (env Coolify — la CLE n'est jamais ici) pour y revenir.
 ENV PORT=3000 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     NEXT_TELEMETRY_DISABLED=1 \
-    CAREER_OPS_CLI=gemini \
+    CAREER_OPS_CLI=claude \
     GEMINI_DEFAULT_AUTH_TYPE=gemini-api-key \
     GEMINI_CLI_TRUST_WORKSPACE=true
 
@@ -36,11 +44,12 @@ RUN apt-get update \
 # Claude Code CLI : l'app le lance en headless (route /api/explore/ai) pour la
 # recherche IA, avec l'abonnement Max de Lineo via CLAUDE_CODE_OAUTH_TOKEN (env
 # Coolify) + CAREER_OPS_CLI=claude. Sans ce binaire, resolveCli('claude') echoue.
-# NOTE : installe mais PAS le defaut (voir CAREER_OPS_CLI plus haut) — un headless
-# VPS sur abonnement Max consomme les quotas d'un compte peut-etre partage.
+# C'est le DEFAUT depuis le 2026-08-05 (voir CAREER_OPS_CLI plus haut). Le prix a
+# assumer est connu et reste vrai : un headless sur abonnement Max consomme les
+# quotas d'un compte peut-etre partage.
 RUN npm install -g @anthropic-ai/claude-code
 
-# Gemini CLI : LA voie gratuite et autonome du VPS. web/src/lib/clis.ts fait
+# Gemini CLI : la voie gratuite, gardee en REPLI. web/src/lib/clis.ts fait
 # tourner un CLI agentique REEL pour /api/run (evaluate, pdf, fix-portal) — sans
 # binaire de CLI dans l'image, /api/run repond 404 « CLI not found ». Version
 # epinglee sur la mineure verifiee (0.53.x) : clis.ts passe

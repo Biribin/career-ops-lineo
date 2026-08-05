@@ -56,11 +56,15 @@ GEMINI_API_KEY=<clé Google AI Studio, projet SANS facturation>
 `CAREER_OPS_TRACKER` et `CAREER_OPS_REPORTS_DIR` redirigent les données qui doivent
 survivre aux redéploiements vers le volume `/app/data`.
 
-`GEMINI_API_KEY` est la **seule** variable à coller à la main : le reste de la voie
-gratuite (`CAREER_OPS_CLI=gemini`, `GEMINI_DEFAULT_AUTH_TYPE`,
-`GEMINI_CLI_TRUST_WORKSPACE`) est figé dans `Dockerfile.web`, ce ne sont pas des
-secrets. Lineo a déjà un pool de clés Gemini en local (`~/.gemini/keys.json`) : en
-reprendre une, ou en créer une sur <https://aistudio.google.com/apikey>.
+`CLAUDE_CODE_OAUTH_TOKEN` est la variable à coller pour le CLI par défaut (voir
+« Quel LLM fait tourner le VPS »). `CAREER_OPS_CLI`, `GEMINI_DEFAULT_AUTH_TYPE` et
+`GEMINI_CLI_TRUST_WORKSPACE` sont figés dans `Dockerfile.web`, ce ne sont pas des
+secrets.
+
+`GEMINI_API_KEY` n'est utile que pour le repli Gemini, et **une seule** clé : une
+liste séparée par des virgules ne fonctionne pas (voir la section suivante). Lineo a
+un pool de clés en local, mais sa rotation est locale — en reprendre **une**, ou en
+créer une sur <https://aistudio.google.com/apikey>.
 
 > ⚠️ **`ANTHROPIC_API_KEY` : à SUPPRIMER des variables Coolify.** Elle y est encore
 > (constaté le 2026-08-05) et c'est une clé **facturée au token**. Aucun script
@@ -77,22 +81,50 @@ réel** en headless (`/api/run` → `evaluate`, `pdf`, `fix-portal` ; `/api/assi
 `/api/explore/ai`). Sans binaire de CLI dans l'image, `/api/run` répond
 `404 CLI not found`. Deux voies gratuites étaient possibles :
 
-| Voie | Coût | Verdict pour le VPS |
+| Voie | Coût | Statut |
 |---|---|---|
-| **A — Claude Code + abonnement Max** (`CAREER_OPS_CLI=claude` + `CLAUDE_CODE_OAUTH_TOKEN`) | 0 € marginal | ❌ **pas le défaut.** Zone grise CGU pour un service headless, consomme les quotas Max d'un compte peut-être partagé, et ne tient pas le volume. Gardé installé pour un usage ponctuel/explicite. |
-| **B — Gemini CLI + clé AI Studio free tier** (`CAREER_OPS_CLI=gemini` + `GEMINI_API_KEY`) | 0 € | ✅ **défaut du VPS.** Autonome, aucun risque CGU, quota généreux, aucune facturation possible. |
+| **A — Claude Code + abonnement Max** (`CAREER_OPS_CLI=claude` + `CLAUDE_CODE_OAUTH_TOKEN`) | 0 € marginal | ✅ **défaut du VPS** (arbitrage Lineo, 2026-08-05). Installé, vérifié (`claude 2.1.222`), et il marche. |
+| **B — Gemini CLI + clé AI Studio free tier** (`CAREER_OPS_CLI=gemini` + `GEMINI_API_KEY`) | 0 € | Installé, gardé en repli. Aucun risque CGU ni facturation possible. |
 
-**Le fond autonome tourne en Gemini ; le tailoring profond se fait en local** dans
-Claude Code (`claude` sur le PC de Lineo, dans un vrai checkout complet), là où les
-quotas Max sont légitimes et où il n'y a pas de service exposé.
+### Pourquoi le défaut a changé
+
+Le défaut était `gemini`, sur trois arguments qui restent valables : zone grise CGU
+pour un service headless, consommation des quotas Max d'un compte peut-être partagé,
+et pas de plafond de volume. **Lineo, propriétaire du compte, a tranché pour Claude
+Code le 2026-08-05** — Gemini par défaut ne fonctionnait pas chez lui : plusieurs
+clés avaient été collées dans `GEMINI_API_KEY` séparées par des virgules, en
+attendant un basculement automatique qui **n'existe pas côté serveur**.
+
+C'est un piège à documenter, pas juste une préférence : [gemini-eval.mjs
+l.149](gemini-eval.mjs#L149) lit `process.env.GEMINI_API_KEY` et le passe **verbatim**
+à `new GoogleGenerativeAI()` ([l.301](gemini-eval.mjs#L301)), et le Gemini CLI attend
+lui aussi une valeur unique. Une liste séparée par des virgules part donc en entier
+comme si c'était une seule clé : tout échoue en `INVALID_ARGUMENT` / 401, **pas** en
+429. Le symptôme ne ressemble pas à un problème de quota. La rotation que Lineo
+connaît (`gemini-rotate`, pool dans `~/.gemini/`, voir `modes/_custom.md`) est
+**strictement locale** : ni le script, ni le pool, ni `~/.gemini/` ne sont dans
+l'image. Pour remettre Gemini en défaut, il faut **une seule** clé dans la variable.
+
+> ⚠️ **Ordre impératif : supprimer `ANTHROPIC_API_KEY` des variables Coolify AVANT
+> de redéployer avec ce défaut.** Cette clé est facturée au token ; la laisser en
+> place tout en promouvant Claude Code en défaut ferait du chemin par défaut une voie
+> de facturation ouverte, au lieu de l'abonnement via `CLAUDE_CODE_OAUTH_TOKEN`.
 
 Comment le défaut est réellement appliqué (ce n'est pas qu'un commentaire) :
 
-- `Dockerfile.web` fixe `ENV CAREER_OPS_CLI=gemini` ;
+- `Dockerfile.web` fixe `ENV CAREER_OPS_CLI=claude` ;
 - `doctor.mjs` lit déjà cette variable (`resolveActiveCli`) ;
-- `GET /api/clis` renvoie `defaultCliId` = ce CLI **s'il est réellement installé**,
-  et `config-form.tsx` le préfère à « le premier CLI installé de la liste ». Sans ça
-  l'ordre de `KNOWN` décidait à notre place, et Claude Code y passe avant Gemini.
+- `GET /api/clis` renvoie `defaultCliId` = ce CLI **s'il est réellement installé**
+  ([route.ts l.17-18](web/src/app/api/clis/route.ts#L17)), et `config-form.tsx` le
+  préfère à « le premier CLI installé de la liste ». Sans ça l'ordre de `KNOWN`
+  décidait à notre place.
+
+L'ordre de priorité réel, vérifié dans
+[config-form.tsx l.74](web/src/components/config-form.tsx#L74) :
+
+```
+choix en localStorage  >  CAREER_OPS_CLI (si le CLI est installé)  >  premier installé
+```
 
 Un choix explicite dans la page Configuration reste prioritaire (il est stocké dans
 le `localStorage` du navigateur, pas côté serveur) : c'est volontaire, mais ça veut
