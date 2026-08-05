@@ -38,4 +38,6 @@ RUN cd web && npm run build
 
 EXPOSE 3000
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sh", "-c", "cd web && npx next start -p ${PORT:-3000} -H 0.0.0.0"]
+# -H :: = écoute IPv6 ET IPv4 (dual-stack). Le réseau Coolify route en IPv6 :
+# sans ça, le proxy joint le conteneur en IPv6 mais Next n'écoute qu'en IPv4 -> 502.
+CMD ["sh", "-c", "cd web && npx next start -p ${PORT:-3000} -H ::"]
