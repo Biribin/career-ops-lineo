@@ -6,7 +6,7 @@ import { careerOpsRoot, readInbox, rootScript } from "@/lib/career-ops";
 import { paramsToFilters } from "@/lib/explore";
 import { classerOffres } from "@/lib/scan-rank.mjs";
 import { titresCibles } from "@/lib/tailor.mjs";
-import { seedExploreFilters } from "@/lib/core/portals";
+import { lireFiltresPortals } from "@/lib/core/portals";
 
 export const runtime = "nodejs";
 // Un balayage d'annuaires ATS est borné par le réseau, pas par le CPU. Même
@@ -137,13 +137,19 @@ export async function GET(req: Request) {
   // pipeline.md est relu APRÈS le scan : c'est là que les nouvelles offres ont
   // atterri, et la liste rendue est donc l'état réel du pipeline (nouvelles +
   // restes des scans précédents), pas seulement la moisson de cette minute.
-  const { filters } = seedExploreFilters();
+  //
+  // `lireFiltresPortals` et non `seedExploreFilters` : ce dernier plafonne à 16
+  // mots-clés (CHIP_CAP, pour la rangée de chips de l'Explorateur) et amputerait
+  // la liste de Linéo de ses 26 entrées les plus précises — le classement
+  // deviendrait plus grossier que sa config, sans rien dire.
+  const filtres_portails = lireFiltresPortals();
+  const cibles = ciblesProfil();
   const { classees, exclues, dejaTraitees } = classerOffres(readInbox(), {
-    positifs: filters.positive,
-    negatifs: filters.negative,
-    lieuxOk: [...filters.alwaysAllow, ...filters.allow],
-    lieuxBloques: filters.block,
-    cibles: ciblesProfil(),
+    positifs: filtres_portails.positive,
+    negatifs: filtres_portails.negative,
+    lieuxOk: [...filtres_portails.alwaysAllow, ...filtres_portails.allow],
+    lieuxBloques: filtres_portails.block,
+    cibles,
     // La date du scanner quand il en a rendu une (elle datera la fraîcheur
     // exactement comme lui) ; sinon celle du serveur.
     aujourdhui: charge?.date ?? new Date().toISOString().slice(0, 10),
@@ -192,7 +198,7 @@ export async function GET(req: Request) {
       exclues_par_les_filtres: exclues,
       // Sans mots-clés ni intitulés cibles, tout sort à 0 et l'ordre n'a plus de
       // sens : il faut le dire plutôt que de servir un classement vide de sens.
-      classement_actif: filters.positive.length > 0 || ciblesProfil().length > 0,
+      classement_actif: filtres_portails.positive.length > 0 || cibles.length > 0,
     },
     error,
   });
