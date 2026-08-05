@@ -1,0 +1,39 @@
+# Cockpit web career-ops — service en ligne (Coolify, career.balzac-info.online).
+#
+# L'app Next vit dans web/ mais execute les .mjs du repo et lit ses fichiers :
+# l'image contient donc TOUT le repo (code). Les RECORDS (candidatures, decisions,
+# suivi) sont rediriges vers un VOLUME persistant via les env CAREER_OPS_* pour
+# survivre aux redeploys (voir DEPLOY-VPS.md).
+#
+# Image slim node+git : suffisant pour le cockpit (suivi, decisions, tracker).
+# Le scan ATS (chromium) et le rendu LaTeX ne sont pas dans cette image v1 ;
+# le CV est rendu par le repo cv (Typst) cote GitHub Actions, pas ici.
+
+FROM node:22-bookworm-slim
+
+# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD : les deps racine tirent playwright ; on evite
+# le telechargement du navigateur (~500 Mo) inutile pour le cockpit v1.
+ENV PORT=3000 \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    NEXT_TELEMETRY_DISABLED=1
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates tini \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Deps racine (pour les .mjs career-ops appeles par l'app). NODE_ENV non fige
+# ici : le build web a besoin des devDependencies.
+COPY package.json package-lock.json* ./
+RUN npm install --no-audit --no-fund
+
+# Deps + build de l'app web
+COPY web/package.json web/package-lock.json* ./web/
+RUN cd web && npm install --no-audit --no-fund
+COPY . .
+RUN cd web && npm run build
+
+EXPOSE 3000
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["sh", "-c", "cd web && npx next start -p ${PORT:-3000} -H 0.0.0.0"]

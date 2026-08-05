@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { resolveCli } from "@/lib/clis";
+import { buildChain, spawnTarget, type Runner } from "@/lib/clis";
 import { careerOpsRoot, readMemory, findReportFile } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf } from "@/lib/pdf-render.mjs";
@@ -17,6 +17,12 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
 // (reserve-report-num.mjs → reports/ → batch/tracker-additions/ → merge-tracker.mjs),
 // so a web evaluation is byte-identical to a CLI one (single source of truth, no
 // drift). kind "research" stays read-only. Streams progress as NDJSON events.
+//
+// RESILIENCE CHAIN (buildChain): the CLI saved in Configuration is tried first;
+// if it fails to produce a clean, real result, the run falls through to Gemini's
+// free tiers (Google login, then API keys with auto-rotation) — the user sees a
+// soft "bascule…" status and the next CLI takes over on the SAME stream. Only the
+// last attempt's failure surfaces as a terminal error.
 type BuildPromptArgs = { kind: string; input: string; memory: string; today: string; pdfPaths?: PdfPaths };
 
 function buildPrompt({ kind, input, memory, today, pdfPaths }: BuildPromptArgs): string {
@@ -83,14 +89,15 @@ export async function POST(req: Request) {
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
-  const resolved = resolveCli(cliId);
-  if (!resolved) {
+  // The resilience chain: the saved CLI first, then Gemini free-tier fallbacks
+  // (each is skipped if its binary isn't installed). Empty = nothing to run.
+  const chain = buildChain(cliId, kind);
+  if (chain.length === 0) {
     return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
-  const { spec, binPath } = resolved;
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
@@ -151,7 +158,6 @@ export async function POST(req: Request) {
 
   const prompt = buildPrompt({ kind, input, memory: readMemory(), today, pdfPaths });
 
-  const isClaude = cliId === "claude";
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
   // guardrail). 'evaluate'/'fix-portal' run the REAL mode + persist canonical
   // artifacts → they need Write + Bash (reserve-report-num / merge-tracker /
@@ -161,19 +167,14 @@ export async function POST(req: Request) {
   // let the agent improvise its own render/fallback exactly like the #2172
   // incident this fix closes). 'research' stays fully read-only. Task
   // (sub-agents) is always blocked (runaway cost). NEVER auto-submits — that is
-  // a prompt-level guarantee.
+  // a prompt-level guarantee. Claude-only: the Gemini fallbacks get an equivalent
+  // scope via --approval-mode (see buildChain / geminiArgsFor).
   const tools =
     kind === "evaluate" || kind === "fix-portal"
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
       : kind === "pdf"
         ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Glob,Grep", disallowed: "Bash,Task,NotebookEdit" }
         : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
-  const args = isClaude
-    ? ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-       "--permission-mode", "acceptEdits",
-       "--allowedTools", tools.allowed,
-       "--disallowedTools", tools.disallowed]
-    : spec.args(prompt);
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
@@ -186,19 +187,20 @@ export async function POST(req: Request) {
     }
   };
   const persists = kind === "evaluate";
-  const reportsBefore = persists ? countReports() : 0;
   // Tracker-mutating runs hold a write token so a row delete can't race their merge
   // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
+  // Acquired once for the whole chain; released once when the stream finalizes.
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
   const enc = new TextEncoder();
 
   // `closed` + kill timer in the OUTER scope so cancel() (client disconnect) can
-  // flip `closed` before the child's late handlers run, and send() is try/catch'd —
+  // flip `closed` before a child's late handlers run, and send() is try/catch'd —
   // otherwise a late enqueue onto a closed controller throws uncaught (see #1155).
   let closed = false;
   let killer: ReturnType<typeof setTimeout> | undefined;
+  // Whichever attempt's child is in flight, so cancel() can kill it.
+  let activeChild: ReturnType<typeof spawn> | null = null;
   // pdf-kind's render+mark work (renderPdf, below) keeps running detached even
   // after the agent child closes — and even after a client disconnect fires
   // cancel(). Track its promise so cancel() can defer releasing writeToken
@@ -212,31 +214,14 @@ export async function POST(req: Request) {
       releaseTrackerWrite(writeToken);
     }
   };
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      let buf = "";
-      let emittedText = false; // any assistant text delta → the CLI actually ran
-      let sawError = false;
-      let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
-      let lastCostUsd: number | null = null;
-      // pdf-mode's agent only tailors content now (rendering moved to the
-      // backend, #2172) — but its killMs still has to leave real headroom
-      // inside the route's overall maxDuration (800s): the render+mark phase
-      // (renderPdf, below) starts only after this timer's window and has no
-      // timeout of its own, so an agent that runs close to its full budget
-      // would otherwise leave the platform's hard maxDuration cutoff to kill
-      // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample —
-      // a Chromium PDF render normally takes low tens of seconds even with a
-      // cold Playwright launch.
-      const killMs = kind === "pdf" ? 600_000 : 285_000;
-      killer = setTimeout(() => {
-        try { child.kill("SIGTERM"); } catch { /* ignore */ }
-      }, killMs);
       const send = (obj: unknown) => {
         if (closed) return;
         try { controller.enqueue(enc.encode(JSON.stringify(obj) + "\n")); } catch { closed = true; }
       };
-      const close = () => {
+      const finalize = () => {
         if (!closed) {
           closed = true;
           if (killer) clearTimeout(killer);
@@ -245,159 +230,225 @@ export async function POST(req: Request) {
         }
       };
 
-      child.stdout.on("data", (d: Buffer) => {
-        if (closed) return;
-        if (!isClaude) {
-          emittedText = true;
-          send({ type: "text", text: d.toString() });
-          return;
-        }
-        buf += d.toString();
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line) continue;
-          try {
-            const ev = JSON.parse(line);
-            if (ev.type === "stream_event") {
-              const e = ev.event;
-              if (e?.type === "content_block_start" && e.content_block?.type === "tool_use") {
-                send({ type: "tool", name: e.content_block.name });
-              } else if (e?.type === "content_block_delta" && e.delta?.text) {
-                emittedText = true;
-                send({ type: "text", text: e.delta.text });
-              }
-            } else if (ev.type === "system" && ev.subtype === "init") {
-              send({ type: "status", label: "Agent ready" });
-            } else if (ev.type === "result") {
-              // Capture the per-run cost; the authoritative "done" is sent on close
-              // (so the honesty gate decides done-vs-error first). Tokens = the same
-              // formula /api/usage uses: input + output + cache-creation.
-              const u = ev.usage || {};
-              lastTokens = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
-              if (typeof ev.total_cost_usd === "number") lastCostUsd = ev.total_cost_usd;
+      // Run ONE attempt of the chain. Resolves true when it produced a clean, real
+      // result (terminal "done" — for pdf, after render — already sent; the caller
+      // must stop). Resolves false when it failed: a soft "bascule…" status was
+      // sent if another attempt remains, or the terminal error when this was last.
+      const runAttempt = (runner: Runner, isLast: boolean) =>
+        new Promise<boolean>((resolve) => {
+          const isClaude = runner.cliId === "claude";
+          const attemptArgs = isClaude
+            ? ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+               "--permission-mode", "acceptEdits",
+               "--allowedTools", tools.allowed,
+               "--disallowedTools", tools.disallowed]
+            : runner.args(prompt);
+          // Base env + this attempt's overrides (undefined value = delete the var,
+          // e.g. clearing GEMINI_API_KEY to force the OAuth/Google-login path).
+          const env: NodeJS.ProcessEnv = { ...process.env };
+          if (runner.env) {
+            for (const [k, v] of Object.entries(runner.env)) {
+              if (v === undefined) delete env[k];
+              else env[k] = v;
             }
-          } catch {
-            /* partial line */
           }
-        }
-      });
-      child.stderr.on("data", (d: Buffer) => {
-        const s = d.toString();
-        // Widened: auth/login/quota failures are the most common real error and
-        // the old narrow regex missed them (silent false "success").
-        if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) {
-          sawError = true;
-          send({ type: "error", msg: s.trim().slice(0, 200) });
-        }
-      });
-      // Render + mark-tracker-ready live in pdf-render.mjs (plain, dependency-
-      // injected, unit-tested) so the render-then-mark orchestration isn't
-      // buried untested inside this transport-layer closure. Runs generate-
-      // pdf.mjs and mark-pdf-ready.mjs as plain Node child processes — no agent
-      // CLI or its sandbox involved — so a browser launch never depends on an
-      // interactive approval nobody is present to grant in a headless/web-
-      // triggered run (#2172). The tracker is marked ✅ only after a CONFIRMED
-      // successful render, not optimistically — same honesty-gate discipline as
-      // the evaluate path below.
-      const renderPdf = async (paths: PdfPaths) => {
-        send({ type: "status", label: "Rendering PDF…" });
-        // renderAndMarkPdf is designed to resolve, never throw — but this is
-        // the one place nothing else awaits or catches this promise (cancel()
-        // only attaches a .finally for the write-token release), so an
-        // unexpected exception here must still close the stream instead of
-        // leaving it — and the write-token — open until process shutdown.
-        try {
-          const result = await renderAndMarkPdf({
-            spawnFn: spawn,
-            execPath: process.execPath,
-            root: careerOpsRoot(),
-            pdfPaths: paths,
-            reportNum: input,
+
+          // Per-attempt state (reset each try) — a later attempt's success is
+          // judged only by ITS OWN output and file writes, not a prior attempt's.
+          const reportsBefore = persists ? countReports() : 0;
+          let buf = "";
+          let emittedText = false; // any assistant text delta → the CLI actually ran
+          let sawError = false;
+          let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
+          let lastCostUsd: number | null = null;
+          let settled = false;
+          const finishAttempt = (ok: boolean) => {
+            if (settled) return;
+            settled = true;
+            if (killer) { clearTimeout(killer); killer = undefined; }
+            resolve(ok);
+          };
+
+          // Announce which CLI is being tried (only when there's a real chain).
+          if (chain.length > 1) send({ type: "status", label: `Essai via ${runner.label}…` });
+
+          // Windows can't spawn the extensionless shim findBin returns — resolve
+          // to the real .exe (claude) or the wrapped node entry (gemini / gemini-rotate).
+          const { file, prefixArgs } = spawnTarget(runner.binPath);
+          const child = spawn(file, [...prefixArgs, ...attemptArgs], { cwd: careerOpsRoot(), env });
+          activeChild = child;
+
+          // pdf-mode's agent only tailors content now (rendering moved to the
+          // backend, #2172) — but its killMs still has to leave real headroom
+          // inside the route's overall maxDuration (800s): the render+mark phase
+          // (renderPdf, below) starts only after this timer's window and has no
+          // timeout of its own. 600s agent / ~200s render is ample.
+          const killMs = kind === "pdf" ? 600_000 : 285_000;
+          killer = setTimeout(() => {
+            try { child.kill("SIGTERM"); } catch { /* ignore */ }
+          }, killMs);
+
+          child.stdout.on("data", (d: Buffer) => {
+            if (closed) return;
+            if (!isClaude) {
+              emittedText = true;
+              send({ type: "text", text: d.toString() });
+              return;
+            }
+            buf += d.toString();
+            let nl: number;
+            while ((nl = buf.indexOf("\n")) !== -1) {
+              const line = buf.slice(0, nl).trim();
+              buf = buf.slice(nl + 1);
+              if (!line) continue;
+              try {
+                const ev = JSON.parse(line);
+                if (ev.type === "stream_event") {
+                  const e = ev.event;
+                  if (e?.type === "content_block_start" && e.content_block?.type === "tool_use") {
+                    send({ type: "tool", name: e.content_block.name });
+                  } else if (e?.type === "content_block_delta" && e.delta?.text) {
+                    emittedText = true;
+                    send({ type: "text", text: e.delta.text });
+                  }
+                } else if (ev.type === "system" && ev.subtype === "init") {
+                  send({ type: "status", label: "Agent ready" });
+                } else if (ev.type === "result") {
+                  // Capture the per-run cost; the authoritative "done" is sent on close
+                  // (so the honesty gate decides done-vs-error first). Tokens = the same
+                  // formula /api/usage uses: input + output + cache-creation.
+                  const u = ev.usage || {};
+                  lastTokens = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
+                  if (typeof ev.total_cost_usd === "number") lastCostUsd = ev.total_cost_usd;
+                }
+              } catch {
+                /* partial line */
+              }
+            }
           });
-          if (result.kind === "render-failed") {
-            send({ type: "error", msg: result.error.slice(0, 200) });
-            return;
-          }
-          // Non-fatal issues (missing format sidecar, tracker not marked) still
-          // surface here rather than only in a server log nobody sees.
-          for (const w of result.warnings) send({ type: "text", text: `⚠️ ${w}\n` });
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
-        } catch (e) {
-          send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
-        } finally {
-          close();
-        }
-      };
+          child.stderr.on("data", (d: Buffer) => {
+            const s = d.toString();
+            // Widened: auth/login/quota failures are the most common real error and
+            // the old narrow regex missed them (silent false "success").
+            if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) {
+              sawError = true;
+              // Surface as a hard error only on the last attempt; otherwise this is
+              // just the reason we'll fall through to the next CLI (soft status on close).
+              if (isLast) send({ type: "error", msg: s.trim().slice(0, 200) });
+            }
+          });
 
-      child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
-      child.on("close", (code) => {
-        // A client disconnect can fire cancel() (which kills `child`) before
-        // this event finally arrives — killing a process doesn't make its
-        // 'close' event disappear, just delays it. Without this guard a pdf
-        // run could still start a brand-new render (and re-touch the tracker)
-        // after the stream — and its writeToken guard — is already gone.
-        if (closed) return;
-        const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
-        // Shared by both honesty gates below: a CLI that produced no output at
-        // all is the same failure mode whether it was evaluating or tailoring
-        // a PDF — one place for the condition/message pair instead of two.
-        const noOutputError = (): string | null => {
-          if (!emittedText && !sawError && !cleanExit) return "Le CLI s'est arrêté sur une erreur — est-il bien installé et connecté ?";
-          if (!emittedText && !sawError) return "Le CLI n'a rien produit — est-il bien installé et connecté ? (career-ops fonctionne au mieux avec Claude Code.)";
-          return null;
-        };
+          // Render + mark-tracker-ready live in pdf-render.mjs (plain, dependency-
+          // injected, unit-tested). Runs generate-pdf.mjs and mark-pdf-ready.mjs as
+          // plain Node child processes — no agent CLI or its sandbox involved — so a
+          // browser launch never depends on an interactive approval nobody is present
+          // to grant (#2172). The tracker is marked ✅ only after a CONFIRMED
+          // successful render, not optimistically — same honesty-gate discipline.
+          const renderPdf = async (paths: PdfPaths) => {
+            send({ type: "status", label: "Rendering PDF…" });
+            try {
+              const result = await renderAndMarkPdf({
+                spawnFn: spawn,
+                execPath: process.execPath,
+                root: careerOpsRoot(),
+                pdfPaths: paths,
+                reportNum: input,
+              });
+              if (result.kind === "render-failed") {
+                send({ type: "error", msg: result.error.slice(0, 200) });
+                return;
+              }
+              // Non-fatal issues (missing format sidecar, tracker not marked) still
+              // surface here rather than only in a server log nobody sees.
+              for (const w of result.warnings) send({ type: "text", text: `⚠️ ${w}\n` });
+              send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+            } catch (e) {
+              send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
+            }
+          };
 
-        if (kind === "pdf") {
-          // Non-empty, not just existing: paired with clearing pdfPaths.html/meta
-          // before the agent started (above), this proves the file is both fresh
-          // (not a leftover from an earlier run of this same report) and real
-          // (not a zero-byte artifact from a half-finished write).
-          const wroteHtml = pdfPaths !== undefined && fs.existsSync(pdfPaths.html) && fs.statSync(pdfPaths.html).size > 0;
-          // Same honesty-gate shape as below, plus the actual bug-fix check: verify
-          // a real HTML artifact exists before ever reporting success (previously
-          // nothing checked this, so an agent that improvised past a failure — e.g.
-          // falling back to wkhtmltopdf — could still report a fake "done").
-          const baseErr = noOutputError();
-          if (baseErr) {
-            send({ type: "error", msg: baseErr });
-          } else if (!wroteHtml || !cleanExit || sawError || !pdfPaths) {
-            send({ type: "error", msg: "Ce traitement n'a produit aucun CV adapté à rendre, donc aucun PDF n'a été généré — relancez-le pour vérifier." });
-          } else {
-            // Tracked so cancel() can defer releasing writeToken until this
-            // settles; close() happens once rendering finishes, not here.
-            pdfRenderPromise = renderPdf(pdfPaths);
-            return;
-          }
-          return close();
-        }
+          child.on("error", (e) => {
+            activeChild = null;
+            if (closed) return finishAttempt(false);
+            // A binary that won't spawn (missing / not executable) isn't a real
+            // failure of this run — try the next CLI, or surface it if it was last.
+            if (isLast) send({ type: "error", msg: e.message });
+            else send({ type: "status", label: `${runner.label} indisponible — bascule vers le CLI suivant…` });
+            finishAttempt(false);
+          });
+          child.on("close", (code) => {
+            activeChild = null;
+            // A client disconnect can fire cancel() (which kills `child`) before
+            // this event finally arrives. Without this guard a pdf run could still
+            // start a brand-new render after the stream — and its writeToken guard —
+            // is already gone.
+            if (closed) return finishAttempt(false);
+            const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
 
-        const wroteReport = countReports() > reportsBefore;
-        // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
-        // real output, AND (for evaluations) a report actually written. Anything else
-        // is surfaced — an errored run must never be banked as a confident score.
-        const baseErr = noOutputError();
-        if (baseErr) {
-          send({ type: "error", msg: baseErr });
-        } else if (persists && !wroteReport) {
-          // The worker ran but never wrote the report/tracker row (e.g. a CLI
-          // without file-write authorization) — surface it instead of a fake score.
-          send({ type: "error", msg: "Cette évaluation n'a pas enregistré de rapport, elle n'est donc pas dans votre tracker. L'évaluation complète est validée sur Claude Code." });
-        } else if (!cleanExit || sawError) {
-          // Produced output (maybe even a report) but did NOT finish cleanly — flag it
-          // instead of recording a confident score off a half-finished run.
-          send({ type: "error", msg: "Ce traitement a rencontré une erreur avant la fin, il n'est donc pas enregistré comme résultat fiable — relancez-le pour vérifier." });
-        } else {
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+            // Fall through to the next CLI (soft status) or, if this was the last
+            // attempt, surface the terminal error. Either way this attempt failed.
+            const fail = (terminalMsg: string) => {
+              if (isLast) send({ type: "error", msg: terminalMsg });
+              else send({ type: "status", label: `${runner.label} n'a pas abouti — bascule vers le CLI suivant…` });
+              finishAttempt(false);
+            };
+
+            // Shared honesty check: a CLI that produced no output at all is the same
+            // failure mode whether evaluating or tailoring a PDF.
+            const noOutputError = (): string | null => {
+              if (!emittedText && !sawError && !cleanExit) return "Le CLI s'est arrêté sur une erreur — est-il bien installé et connecté ?";
+              if (!emittedText && !sawError) return "Le CLI n'a rien produit — est-il bien installé et connecté ? (career-ops fonctionne au mieux avec Claude Code.)";
+              return null;
+            };
+
+            if (kind === "pdf") {
+              // Non-empty, not just existing: paired with clearing pdfPaths.html/meta
+              // before the agent started, this proves the file is both fresh and real.
+              const wroteHtml = pdfPaths !== undefined && fs.existsSync(pdfPaths.html) && fs.statSync(pdfPaths.html).size > 0;
+              const baseErr = noOutputError();
+              if (baseErr) return fail(baseErr);
+              if (!wroteHtml || !cleanExit || sawError || !pdfPaths) {
+                return fail("Ce traitement n'a produit aucun CV adapté à rendre, donc aucun PDF n'a été généré — relancez-le pour vérifier.");
+              }
+              // Success: render (sends "done") then finalize the whole stream. The
+              // attempt resolves true only after render settles, so cancel() can
+              // defer releasing writeToken until mark-pdf-ready.mjs is done.
+              pdfRenderPromise = renderPdf(pdfPaths).then(() => finalize());
+              pdfRenderPromise.finally(() => finishAttempt(true));
+              return;
+            }
+
+            const wroteReport = countReports() > reportsBefore;
+            // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN
+            // exit, real output, AND (for evaluations) a report actually written.
+            const baseErr = noOutputError();
+            if (baseErr) return fail(baseErr);
+            if (persists && !wroteReport) {
+              return fail("Cette évaluation n'a pas enregistré de rapport, elle n'est donc pas dans votre tracker. L'évaluation complète est validée sur Claude Code.");
+            }
+            if (!cleanExit || sawError) {
+              return fail("Ce traitement a rencontré une erreur avant la fin, il n'est donc pas enregistré comme résultat fiable — relancez-le pour vérifier.");
+            }
+            send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+            finishAttempt(true);
+          });
+        });
+
+      // Drive the chain: try each CLI in order until one produces a clean result.
+      (async () => {
+        for (let i = 0; i < chain.length; i++) {
+          if (closed) break;
+          const ok = await runAttempt(chain[i], i === chain.length - 1);
+          if (ok) break;
         }
-        close();
-      });
+        // pdf success finalizes inside its render chain; everything else here.
+        if (!pdfRenderPromise) finalize();
+      })();
     },
     cancel() {
       closed = true;
       if (killer) clearTimeout(killer);
-      try { child.kill("SIGTERM"); } catch { /* ignore */ }
+      try { activeChild?.kill("SIGTERM"); } catch { /* ignore */ }
       if (pdfRenderPromise) {
         // Render/mark keeps running after this client disconnects — wait for
         // it to settle before releasing the guard, so a concurrent tracker

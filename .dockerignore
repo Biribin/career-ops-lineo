@@ -1,5 +1,11 @@
 .git
 node_modules
+web/node_modules
+web/.next
+web/.next-prod
+web/out
+# data/ = records persistants -> volume Coolify monte sur /app/data, jamais dans l'image
+data
 output
 batch/logs
 batch/batch-state.tsv
