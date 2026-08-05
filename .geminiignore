@@ -1,0 +1,25 @@
+# Remplace .gitignore comme filtre de lecture du Gemini CLI
+# (.gemini/settings.json : context.fileFiltering.respectGitIgnore = false).
+#
+# Le but du basculement est de laisser le CLI lire la couche utilisateur gitignoree
+# (cv.md, config/profile.yml, modes/_profile.md, jds/, reports/) — SANS pour autant
+# lui ouvrir les secrets. Tout ce qui est un secret ou du bruit reste ici.
+
+# Secrets — jamais lisibles par le modele
+.env
+.env.*
+*.pem
+*.key
+*.p12
+credentials.json
+**/service-account*.json
+
+# Bruit / volume
+.git/
+node_modules/
+web/node_modules/
+web/.next/
+web/.next-prod/
+dashboard/career-dashboard
+*.log
+batch/logs/
