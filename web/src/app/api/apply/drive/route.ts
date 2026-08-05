@@ -60,7 +60,7 @@ export async function POST(req: Request) {
           }
         }
         // Didn't reach a real form → classify why for a clear message.
-        const why = await classifyEmpty(page, s.url).catch(() => ({ message: "Couldn't reach a fillable form on this page." }));
+        const why = await classifyEmpty(page, s.url).catch(() => ({ message: "Impossible d'atteindre un formulaire remplissable sur cette page." }));
         emit({ t: "error", reason: result.reason, message: result.reason === "stuck" ? result.steps.at(-1)?.detail || why.message : why.message });
       } catch (e) {
         emit({ t: "error", message: e instanceof Error ? e.message.slice(0, 160) : "drive failed" });

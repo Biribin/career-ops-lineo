@@ -38,7 +38,7 @@ export async function POST(req: Request) {
 
   if (!trackerCanDelete()) {
     return Response.json(
-      { error: "Removing a tracker row needs a newer career-ops — update to delete rows from here." },
+      { error: "Supprimer une ligne du tracker nécessite une version plus récente de career-ops — mettez à jour pour supprimer des lignes depuis ici." },
       { status: 400 },
     );
   }
@@ -46,12 +46,12 @@ export async function POST(req: Request) {
   // (tracker.mjs delete doesn't share a lock with merge-tracker yet).
   if (isTrackerWriting()) {
     return Response.json(
-      { error: "An evaluation is updating your tracker right now — try again in a moment." },
+      { error: "Une évaluation est en train de mettre à jour votre tracker — réessayez dans un instant." },
       { status: 409 },
     );
   }
   if (!dryRun && deleting) {
-    return Response.json({ error: "Another delete is already in progress — try again in a moment." }, { status: 409 });
+    return Response.json({ error: "Une autre suppression est déjà en cours — réessayez dans un instant." }, { status: 409 });
   }
   if (!dryRun) deleting = true;
 

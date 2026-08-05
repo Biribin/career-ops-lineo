@@ -78,7 +78,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     try {
       const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id, cliId: cliId(), goal: "reach" }) });
       if (!r.body) {
-        setError("The agent couldn't start.");
+        setError("L'agent n'a pas pu démarrer.");
         setStatus("error");
         return;
       }
@@ -110,13 +110,13 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
             setStatus("ready"); // → the ready-effect auto-prefills if pending
           } else if (ev.t === "error") {
             finished = true;
-            setError(ev.message || "The agent couldn't reach a fillable form.");
+            setError(ev.message || "L'agent n'a pas pu atteindre un formulaire remplissable.");
             setStatus("error");
           }
         }
       }
       if (!finished) {
-        setError("The agent stopped before reaching a form.");
+        setError("L'agent s'est arrêté avant d'atteindre un formulaire.");
         setStatus("error");
       }
     } catch (e) {
@@ -161,7 +161,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       setIssues(d.issues ?? []);
       setStatus("ready");
     } catch {
-      setError("Could not open the form.");
+      setError("Impossible d'ouvrir le formulaire.");
       setStatus("error");
     }
   }, []);
@@ -169,7 +169,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const prefill = useCallback(async () => {
     if (!sessionId.current) return;
     if (!cliId()) {
-      setError("Configure a CLI in Config first, then pre-fill from your CV.");
+      setError("Configurez d'abord un CLI dans la configuration, puis préremplissez depuis votre CV.");
       return;
     }
     setStatus("prefilling");
@@ -188,7 +188,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     try {
       const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId() }) });
       if (!r.body) {
-        setError("Couldn't pre-fill — no response stream.");
+        setError("Préremplissage impossible — aucun flux de réponse.");
         setStatus("ready");
         return;
       }
@@ -217,11 +217,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           } else if (ev.t === "done") {
             got = true;
             applyAnswers(ev.answers ?? {});
-            if ((ev.count ?? 0) === 0) setError("The planner returned 0 answers — see the diagnostics log below.");
-            else if (ev.truncated) setError("The planner was cut off — some fields were recovered, others may be blank. See diagnostics.");
+            if ((ev.count ?? 0) === 0) setError("Le planificateur a renvoyé 0 réponse — voyez le journal de diagnostic ci-dessous.");
+            else if (ev.truncated) setError("Le planificateur a été coupé — certains champs ont été récupérés, d'autres peuvent être vides. Voyez le diagnostic.");
           } else if (ev.t === "error") {
             sawError = true;
-            setError(ev.m ? `Couldn't pre-fill: ${ev.m}` : "Couldn't pre-fill from your CV.");
+            setError(ev.m ? `Préremplissage impossible : ${ev.m}` : "Préremplissage impossible depuis votre CV.");
             setPrefillLog((p) => [...p, `✗ ${ev.m ?? "error"}${ev.raw ? ` — raw tail: ${ev.raw.slice(0, 160)}` : ""}`]);
           }
         }
@@ -272,7 +272,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           return [...prev, ...(d.issues as ApplyIssue[]).filter((i) => !seen.has(i.message))];
         });
       }
-      if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you).");
+      if (d.navigated) setError("Attention : la page du formulaire a changé pendant le remplissage — relisez-la attentivement avant d'envoyer (career-ops n'envoie jamais à votre place).");
       setStatus("done");
       // ESCALATION ("si no va, full agente"): if deterministic fill clearly
       // didn't land (most fields failed / mismatched), let the agent fill it.
@@ -302,7 +302,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     try {
       const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans }) });
       if (!r.body) {
-        setError("The agent couldn't start filling.");
+        setError("L'agent n'a pas pu commencer le remplissage.");
         setStatus("error");
         return;
       }
@@ -326,10 +326,10 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           }
           if (ev.t === "step") setDriveSteps((p) => [...p, ev as DriveStep]);
           else if (ev.t === "done") {
-            setIssues((prev) => [...prev, { level: "info", code: "ai-filled", message: ev.filled ? "AI filled the form for you — review every answer on the real form, then submit it yourself." : "AI did its best but couldn't finish — check the real form before submitting." }]);
+            setIssues((prev) => [...prev, { level: "info", code: "ai-filled", message: ev.filled ? "AI filled the form for you — review every answer on the real form, then submit it yourself." : "L'IA a fait de son mieux mais n'a pas pu terminer — vérifiez le vrai formulaire avant d'envoyer." }]);
             setStatus("done");
           } else if (ev.t === "error") {
-            setError(ev.message || "The agent couldn't fill the form.");
+            setError(ev.message || "L'agent n'a pas pu remplir le formulaire.");
             setStatus("error");
           }
         }

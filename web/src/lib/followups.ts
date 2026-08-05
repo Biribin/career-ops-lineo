@@ -3,8 +3,51 @@
 // the core's — followup-cadence.mjs --json — never recomputed here; these are
 // only the display-side contracts and formatters.
 
+// Valeurs ÉCRITES dans data/follow-ups.md et validées côté serveur — le moteur
+// followup-cadence.mjs les relit. Jamais traduites ; voir channelLabel() pour
+// l'affichage.
 export const CHANNELS = ["Email", "LinkedIn", "Phone", "Other"] as const;
 export type Channel = (typeof CHANNELS)[number];
+
+// ⚠️ Les trois tables ci-dessous sont typées EXHAUSTIVEMENT à dessein : si un
+// merge upstream ajoute un canal, une urgence ou un statut de cadence, elles
+// cessent de compiler au lieu d'afficher silencieusement la nouvelle valeur en
+// anglais. Ajoutez le libellé — n'élargissez pas le type en Record<string, …>.
+
+const CHANNEL_LABEL_FR: Record<Channel, string> = {
+  Email: "E-mail",
+  LinkedIn: "LinkedIn",
+  Phone: "Téléphone",
+  Other: "Autre",
+};
+
+/** Canal (valeur persistée) → libellé français. Affichage seulement. */
+export function channelLabel(channel: string): string {
+  return (CHANNEL_LABEL_FR as Record<string, string>)[channel] ?? channel;
+}
+
+const URGENCY_LABEL_FR: Record<Urgency, string> = {
+  urgent: "urgent",
+  overdue: "en retard",
+  waiting: "en attente",
+  cold: "refroidie",
+};
+
+/** Urgence calculée par le moteur du cœur → libellé français. Affichage seulement. */
+export function urgencyLabel(u: string): string {
+  return (URGENCY_LABEL_FR as Record<string, string>)[u] ?? u;
+}
+
+const CADENCE_STATUS_LABEL_FR: Record<CadenceEntry["status"], string> = {
+  applied: "Envoyée",
+  responded: "Réponse reçue",
+  interview: "Entretien",
+};
+
+/** Statut de cadence ("applied" | "responded" | "interview") → libellé français. */
+export function cadenceStatusLabel(status: string): string {
+  return (CADENCE_STATUS_LABEL_FR as Record<string, string>)[status.toLowerCase()] ?? status;
+}
 
 /** The profile.yml → followup_cadence keys the core followup-cadence.mjs reads. */
 export const PROFILE_CADENCE_KEYS = [
@@ -100,12 +143,12 @@ export function followupStatusTone(status: string): "good" | "info" | "muted" {
   return "muted";
 }
 
-/** "today" / "tomorrow" / "in N days" / "N days ago" from a daysUntil delta. */
+/** « aujourd'hui » / « demain » / « dans N jours » / « il y a N jours ». */
 export function relativeDays(daysUntil: number): string {
-  if (daysUntil === 0) return "today";
-  if (daysUntil === 1) return "tomorrow";
-  if (daysUntil > 1) return `in ${daysUntil} days`;
-  return daysUntil === -1 ? "1 day ago" : `${-daysUntil} days ago`;
+  if (daysUntil === 0) return "aujourd'hui";
+  if (daysUntil === 1) return "demain";
+  if (daysUntil > 1) return `dans ${daysUntil} jours`;
+  return daysUntil === -1 ? "il y a 1 jour" : `il y a ${-daysUntil} jours`;
 }
 
 /** 7/14-day escalation for "days since" cells: amber bold ≥7, red bold ≥14. */
@@ -132,9 +175,9 @@ export function isRealISODate(s: string): boolean {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
-/** Oxford-style join: "A", "A and B", "A, B, and C". */
+/** Énumération à la française : « A », « A et B », « A, B et C » (pas de virgule
+ *  avant le « et » — la virgule de série n'existe pas en français). */
 export function oxfordJoin(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
-  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
-  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+  return `${parts.slice(0, -1).join(", ")} et ${parts[parts.length - 1]}`;
 }

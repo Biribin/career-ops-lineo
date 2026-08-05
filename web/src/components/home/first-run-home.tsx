@@ -19,15 +19,16 @@ export function FirstRunHome() {
         <div aria-hidden className="pointer-events-none absolute inset-0 z-[1] bg-surface/55 backdrop-blur-[2px] dark:bg-background/45" />
         <div className="relative z-10">
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted">
-            <span className="text-faint">//</span> local-first · your machine
+            <span className="text-faint">//</span> en local · votre machine
           </p>
           <h1 className={`${instrumentSerif.className} mt-3 text-4xl leading-[1.05] text-landing md:text-5xl`}>
-            Drop your CV. See who&apos;s hiring you in 60 seconds.
+            Déposez votre CV. Voyez qui recrute en 60 secondes.
           </h1>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-muted">
-            No account. No setup. Your CV is parsed once on your own AI, then we scan the live job market for roles
-            that fit you — <span className="text-foreground">that part&apos;s free</span>. You only spend tokens again
-            when you choose to score a role.
+            Aucun compte. Aucune configuration. Votre CV est analysé une seule fois par votre propre IA, puis nous
+            scrutons le marché de l&apos;emploi pour trouver les postes qui vous correspondent —{" "}
+            <span className="text-foreground">et ça, c&apos;est gratuit</span>. Vous ne consommez des jetons que
+            lorsque vous choisissez d&apos;évaluer une offre.
           </p>
           <div className="mt-7">
             <CvIngest />

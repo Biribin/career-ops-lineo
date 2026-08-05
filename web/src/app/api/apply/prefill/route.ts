@@ -200,13 +200,13 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
       log(`output tail: ${result.buf.slice(-100).replace(/\s+/g, " ") || "(empty)"}`);
 
       if (!result.buf.trim()) {
-        return fail(result.signal ? "planner was killed before producing any output (try again / smaller form)" : "planner produced no output (check the CLI works in this folder)");
+        return fail(result.signal ? "le planificateur a été interrompu avant de produire quoi que ce soit (réessayez / formulaire plus petit)" : "le planificateur n'a rien produit (vérifiez que le CLI fonctionne dans ce dossier)");
       }
 
       const { obj, truncated } = extractJsonObject(result.buf);
       if (!obj) {
         return fail(
-          result.signal ? "planner was killed mid-answer (form too large/slow) — couldn't recover any fields" : "couldn't parse the planner's answer as JSON",
+          result.signal ? "planner was killed mid-answer (form too large/slow) — couldn't recover any fields" : "impossible d'analyser la réponse du planificateur en JSON",
           result.buf.slice(-300),
         );
       }

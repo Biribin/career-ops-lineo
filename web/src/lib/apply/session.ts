@@ -41,7 +41,7 @@ async function gotoResilient(page: Page, url: string): Promise<Response | null> 
       await page.waitForTimeout(800 * (attempt + 1));
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error("could not open the page");
+  throw lastErr instanceof Error ? lastErr : new Error("impossible d'ouvrir la page");
 }
 
 /** Distinguish a real APPLICATION form from a careers-listing / job-search form
@@ -138,7 +138,7 @@ async function headedBrowser(): Promise<Browser> {
     try {
       nb = await chromium.launch({ headless: false, args: ["--window-position=-3200,-3200", "--window-size=1280,940"] });
     } catch {
-      throw new Error("The apply feature needs Google Chrome. Install Chrome (or run: npx playwright install chromium) and try again.");
+      throw new Error("La fonction de candidature nécessite Google Chrome. Installez Chrome (ou lancez : npx playwright install chromium) puis réessayez.");
     }
   }
   globalThis.__coHeadedBrowser = nb;
@@ -274,7 +274,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   const issues: ApplyIssue[] = [...consentIssues];
   if (cap) issues.push(cap);
   if (multi) issues.push(multi);
-  if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "This form had an uncommon layout, so AI read its fields live — give them an extra check before submitting." });
+  if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "Ce formulaire avait une structure inhabituelle : l'IA a lu ses champs en direct — vérifiez-les une fois de plus avant d'envoyer." });
   if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} field${unlabeled > 1 ? "s" : ""} couldn't be labelled cleanly — double-check ${unlabeled > 1 ? "them" : "it"} before submitting.` });
 
   const id = `apply-${crypto.randomUUID()}`;
@@ -333,7 +333,7 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   s.frame = frame;
   s.fields = form.fields;
   if (form.title) s.title = form.title;
-  const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "AI navigated to reach this application form on your machine — review the fields before submitting." }];
+  const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "L'IA a navigué pour atteindre ce formulaire de candidature sur votre machine — relisez les champs avant d'envoyer." }];
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "AI also read the fields live (uncommon layout) — give them an extra check." });
   const cap = await captchaWarning(s.page);
   if (cap) issues.push(cap);

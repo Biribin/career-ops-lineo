@@ -10,6 +10,8 @@ import type { Application } from "@/lib/career-ops";
 
 // Awaiting-decision row: a scored role with no terminal status. One-tap Apply /
 // Skip writes back through the EXISTING /api/status (UPDATE-only, canonical states).
+// Les valeurs "Applied" / "Discarded" sont les jetons canoniques du tracker —
+// seuls les libellés des boutons sont traduits.
 export function DecisionCard({ app }: { app: Application }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
@@ -62,7 +64,7 @@ export function DecisionCard({ app }: { app: Application }) {
           onClick={() => setStatus("Applied")}
           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-text transition hover:bg-brand/15 disabled:opacity-60 max-sm:min-h-[44px]"
         >
-          {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Mark applied
+          {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Marquer envoyée
         </button>
         <button
           type="button"
@@ -70,9 +72,9 @@ export function DecisionCard({ app }: { app: Application }) {
           onClick={() => setStatus("Discarded")}
           className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px] max-sm:px-4"
         >
-          {busy === "Discarded" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} Skip
+          {busy === "Discarded" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} Écarter
         </button>
-        <a href={`/pipeline/${app.n}`} title="Open report" aria-label="Open report" className="inline-flex shrink-0 items-center justify-center rounded p-1.5 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
+        <a href={`/pipeline/${app.n}`} title="Ouvrir le rapport" aria-label="Ouvrir le rapport" className="inline-flex shrink-0 items-center justify-center rounded p-1.5 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
           <FileText className="size-4" />
         </a>
       </div>

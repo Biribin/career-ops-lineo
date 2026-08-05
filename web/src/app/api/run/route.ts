@@ -99,7 +99,8 @@ export async function POST(req: Request) {
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
       JSON.stringify({
-        error: `This needs a complete career-ops checkout (${required}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
+        // ⚠️ Formulation reconnue par le test scannerMissing d'explorer-view.tsx.
+        error: `Ceci nécessite une installation career-ops complète (${required}). CAREER_OPS_ROOT ne contient que des données — pointez-le vers une installation complète.`,
       }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
@@ -109,7 +110,7 @@ export async function POST(req: Request) {
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
   if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
     return new Response(
-      JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
+      JSON.stringify({ error: "Ajoutez d'abord votre CV pour que je puisse évaluer cette offre par rapport à vous — déposez-le sur la page d'accueil." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
@@ -343,8 +344,8 @@ export async function POST(req: Request) {
         // all is the same failure mode whether it was evaluating or tailoring
         // a PDF — one place for the condition/message pair instead of two.
         const noOutputError = (): string | null => {
-          if (!emittedText && !sawError && !cleanExit) return "The CLI exited with an error — is it installed and authenticated?";
-          if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
+          if (!emittedText && !sawError && !cleanExit) return "Le CLI s'est arrêté sur une erreur — est-il bien installé et connecté ?";
+          if (!emittedText && !sawError) return "Le CLI n'a rien produit — est-il bien installé et connecté ? (career-ops fonctionne au mieux avec Claude Code.)";
           return null;
         };
 
@@ -362,7 +363,7 @@ export async function POST(req: Request) {
           if (baseErr) {
             send({ type: "error", msg: baseErr });
           } else if (!wroteHtml || !cleanExit || sawError || !pdfPaths) {
-            send({ type: "error", msg: "This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify." });
+            send({ type: "error", msg: "Ce traitement n'a produit aucun CV adapté à rendre, donc aucun PDF n'a été généré — relancez-le pour vérifier." });
           } else {
             // Tracked so cancel() can defer releasing writeToken until this
             // settles; close() happens once rendering finishes, not here.
@@ -382,11 +383,11 @@ export async function POST(req: Request) {
         } else if (persists && !wroteReport) {
           // The worker ran but never wrote the report/tracker row (e.g. a CLI
           // without file-write authorization) — surface it instead of a fake score.
-          send({ type: "error", msg: "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code." });
+          send({ type: "error", msg: "Cette évaluation n'a pas enregistré de rapport, elle n'est donc pas dans votre tracker. L'évaluation complète est validée sur Claude Code." });
         } else if (!cleanExit || sawError) {
           // Produced output (maybe even a report) but did NOT finish cleanly — flag it
           // instead of recording a confident score off a half-finished run.
-          send({ type: "error", msg: "This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify." });
+          send({ type: "error", msg: "Ce traitement a rencontré une erreur avant la fin, il n'est donc pas enregistré comme résultat fiable — relancez-le pour vérifier." });
         } else {
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         }

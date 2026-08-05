@@ -157,7 +157,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setDroppedNoDate(0);
     setPartial(false);
     setError("");
-    setStatus("Casting the net across the ATS network…");
+    setStatus("Lancement du filet sur le réseau des ATS…");
     const init: Partial<Record<AtsSource, SourceState>> = {};
     for (const a of f.ats) init[a] = { state: "queued" };
     setSources(init);
@@ -180,9 +180,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       });
       if (r.status === 400) {
         const d = await r.json().catch(() => ({}));
-        sawError = d.error || "The scanner isn't available.";
+        sawError = d.error || "Le scanner n'est pas disponible.";
       } else if (!r.body) {
-        sawError = "No response stream.";
+        sawError = "Aucun flux de réponse.";
       } else {
         const reader = r.body.getReader();
         const dec = new TextDecoder();
@@ -205,7 +205,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
             switch (ev.kind) {
               case "atsStart":
                 setPhase("scanning");
-                setStatus(`Walking ${ATS_LABEL[ev.ats as AtsSource] ?? ev.ats} — ${ev.companies.toLocaleString()} companies`);
+                setStatus(`Parcours de ${ATS_LABEL[ev.ats as AtsSource] ?? ev.ats} — ${ev.companies.toLocaleString("fr-FR")} entreprises`);
                 setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", companies: ev.companies } }));
                 break;
               case "progress":
@@ -248,7 +248,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (e) {
-      sawError = e instanceof Error ? e.message : "stream error";
+      sawError = e instanceof Error ? e.message : "erreur de flux";
     }
 
     // Mark any still-active sources as swept (stream ended).
@@ -262,7 +262,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     if (acc.length > 0) {
       setMatchCount(acc.length);
       setPhase("revealing");
-      setStatus(`${acc.length} fresh role${acc.length === 1 ? "" : "s"} found — free.`);
+      setStatus(`${acc.length} poste${acc.length === 1 ? "" : "s"} récent${acc.length === 1 ? "" : "s"} trouvé${acc.length === 1 ? "" : "s"} — gratuitement.`);
       window.setTimeout(() => setPhase("results"), 850);
     } else if (sawError) {
       setError(sawError);
@@ -360,7 +360,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setAiTrace([]);
     setAiCost({ searches: 0, candidates: 0, fetches: 0 });
     setError("");
-    setStatus("Casting across the open web…");
+    setStatus("Recherche sur le web ouvert…");
     if (typeof window !== "undefined") window.history.replaceState(null, "", `/explore?${aiToParams(intent)}`);
 
     let knownUrls = new Set<string>();
@@ -407,9 +407,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       }
       if (r.status === 400) {
         const d = await r.json().catch(() => ({}));
-        sawError = d.error || "AI search isn't available.";
+        sawError = d.error || "La recherche IA n'est pas disponible.";
       } else if (!r.body) {
-        sawError = "No response stream.";
+        sawError = "Aucun flux de réponse.";
       } else {
         const reader = r.body.getReader();
         const dec = new TextDecoder();
@@ -421,14 +421,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         handle(parser.flush());
       }
     } catch (e) {
-      sawError = e instanceof Error ? e.message : "stream error";
+      sawError = e instanceof Error ? e.message : "erreur de flux";
     }
 
     runningRef.current = false;
     if (acc.length > 0) {
       setMatchCount(acc.length);
       setPhase("revealing");
-      setStatus(`${acc.length} candidate${acc.length === 1 ? "" : "s"} found.`);
+      setStatus(`${acc.length} candidat${acc.length === 1 ? "" : "s"} trouvé${acc.length === 1 ? "" : "s"}.`);
       window.setTimeout(() => setPhase("results"), 850);
     } else if (sawError) {
       setError(sawError);

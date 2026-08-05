@@ -43,15 +43,15 @@ export function CopyableCommand({
           copied ? "opacity-100" : "opacity-0",
         )}
       >
-        Copied
+        Copié
       </span>
       <Button
         variant="ghost"
         size="icon"
         type="button"
         onClick={handleCopy}
-        aria-label={copied ? "Copied to clipboard" : "Copy command"}
-        title={copied ? "Copied" : "Copy"}
+        aria-label={copied ? "Copié dans le presse-papiers" : "Copier la commande"}
+        title={copied ? "Copié" : "Copier"}
         className="shrink-0 text-muted"
       >
         {copied ? (

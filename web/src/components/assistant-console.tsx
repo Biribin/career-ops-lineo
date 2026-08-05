@@ -35,7 +35,7 @@ const NAV_RE = /<<\s*go:\s*(\/[a-z0-9/_-]*)\s*>>/gi;
 const REMEMBER_RE = /<<\s*remember:\s*([^>]+?)\s*>>/gi;
 
 const GREETING =
-  "Hi — I'm your career-ops assistant. I can walk you through onboarding, answer questions about your pipeline, or take you where you need to go. What would you like to do?";
+  "Bonjour — je suis votre assistant career-ops. Je peux vous guider dans la configuration, répondre à vos questions sur vos candidatures, ou vous emmener là où vous avez besoin d'aller. Que voulez-vous faire ?";
 
 // ── envelope parsing: act ONLY on complete <<act:ID {json}>> envelopes ────────
 function codeRanges(s: string): [number, number][] {
@@ -95,17 +95,19 @@ function removeRanges(s: string, cuts: [number, number][]): string {
 
 // Page awareness: describe the route so "this offer" / "apply" resolves to what
 // the user is looking at.
+// Contexte envoyé au modèle (pas affiché). Rédigé en français pour que
+// l'assistant réponde dans la langue de l'interface.
 function describePage(p: string): string {
-  if (p === "/") return "Today / home — overview of the user's pipeline.";
-  if (p === "/pipeline") return "Pipeline — the applications table + the inbox of pending job URLs.";
+  if (p === "/") return "Aujourd'hui / accueil — vue d'ensemble des candidatures de l'utilisateur.";
+  if (p === "/pipeline") return "Candidatures — le tableau des candidatures + la file de tri des URL d'offres en attente.";
   const m = p.match(/^\/pipeline\/([^/]+)$/);
   if (m)
-    return `The user is viewing the EVALUATION REPORT for application #${m[1]}. If they say "this offer", "apply", "evaluate it", "draft a cover letter", they mean application #${m[1]} — read reports/${m[1]}-*.md or the matching data/applications.md row and act on THAT one.`;
-  if (p === "/analytics") return "Analytics — funnel, score distribution, top companies.";
-  if (p === "/cv") return "CV editor (cv.md).";
-  if (p === "/config") return "Config — CLI / engine setup.";
-  if (p === "/apply") return "Apply — the form-proxy: the user is reviewing a job application re-rendered in plain language, pre-filled from their CV. You can write/revise answers via setApplyField.";
-  if (p.startsWith("/jobs/")) return "Watching a running worker / evaluation in progress.";
+    return `L'utilisateur consulte le RAPPORT D'ÉVALUATION de la candidature n° ${m[1]}. S'il dit « cette offre », « candidater », « évalue-la », « rédige une lettre de motivation », il parle de la candidature n° ${m[1]} — lis reports/${m[1]}-*.md ou la ligne correspondante de data/applications.md et agis sur CELLE-LÀ.`;
+  if (p === "/analytics") return "Statistiques — entonnoir, répartition des scores, entreprises les plus sollicitées.";
+  if (p === "/cv") return "Éditeur de CV (cv.md).";
+  if (p === "/config") return "Configuration — réglage du CLI / du moteur.";
+  if (p === "/apply") return "Candidater — le proxy de formulaire : l'utilisateur relit une candidature réaffichée en langage clair, préremplie depuis son CV. Tu peux rédiger ou retoucher les réponses via setApplyField.";
+  if (p.startsWith("/jobs/")) return "Suivi d'un traitement / d'une évaluation en cours.";
   return `Route ${p}.`;
 }
 
@@ -356,7 +358,7 @@ export function AssistantConsole() {
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
-        setStreamText(`⚠️ ${err.error || "Assistant unavailable."}`);
+        setStreamText(`⚠️ ${err.error || "Assistant indisponible."}`);
         return;
       }
       const reader = res.body.getReader();
@@ -451,28 +453,28 @@ export function AssistantConsole() {
     const chips: { label: string; send: string }[] = [];
     const rep = pathname.match(/^\/pipeline\/(.+)$/);
     if (rep) {
-      chips.push({ label: "Why this score?", send: "Walk me through why this offer scored the way it did — strengths and red flags." });
-      chips.push({ label: "Should I apply?", send: "Given my profile, should I apply to this one? Be honest." });
-      chips.push({ label: "Draft a cover letter", send: "Draft a short, sharp cover letter for this role." });
+      chips.push({ label: "Pourquoi ce score ?", send: "Explique-moi pourquoi cette offre a obtenu ce score — points forts et signaux d'alerte." });
+      chips.push({ label: "Est-ce que je candidate ?", send: "Vu mon profil, est-ce que je devrais candidater à celle-ci ? Sois honnête." });
+      chips.push({ label: "Rédiger une lettre de motivation", send: "Rédige une lettre de motivation courte et percutante pour ce poste." });
       return chips;
     }
     const pending = pipeline.inbox.filter((j) => !j.done);
     if (!pipeline.applications.length && !pending.length) {
       return [
-        { label: "Help me get set up", send: "Help me get started with career-ops — what do you need from me?" },
-        { label: "Improve my CV", send: "Look at my CV and suggest the highest-impact improvements." },
+        { label: "Aide-moi à me configurer", send: "Aide-moi à démarrer avec career-ops — de quoi as-tu besoin de ma part ?" },
+        { label: "Améliorer mon CV", send: "Regarde mon CV et propose les améliorations qui auront le plus d'impact." },
       ];
     }
     if (pending.length) {
       const counts = new Map<string, number>();
       for (const j of pending) counts.set(j.company, (counts.get(j.company) ?? 0) + 1);
       const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
-      if (top && top[1] > 1) chips.push({ label: `Evaluate all ${top[0]} (${top[1]})`, send: `Evaluate all the pending ${top[0]} postings in my inbox.` });
-      chips.push({ label: `Triage inbox (${pending.length})`, send: `I have ${pending.length} postings in my inbox — which should I evaluate first, and why?` });
+      if (top && top[1] > 1) chips.push({ label: `Évaluer toutes les offres ${top[0]} (${top[1]})`, send: `Évalue toutes les offres ${top[0]} en attente dans ma file de tri.` });
+      chips.push({ label: `Trier la file (${pending.length})`, send: `J'ai ${pending.length} offres dans ma file de tri — lesquelles devrais-je évaluer en premier, et pourquoi ?` });
     }
     const strong = pipeline.applications.filter((a) => scoreNum(a.score) >= 4.5).length;
-    if (strong) chips.push({ label: "Strong matches to act on", send: "Show me my strongest matches (4.5+) I haven't applied to yet, and tell me which to prioritise." });
-    chips.push({ label: "What should I do today?", send: "Look at my pipeline and tell me the 3 highest-leverage things I should do today." });
+    if (strong) chips.push({ label: "Offres fortes à traiter", send: "Montre-moi mes meilleures correspondances (4,5+) auxquelles je n'ai pas encore candidaté, et dis-moi lesquelles prioriser." });
+    chips.push({ label: "Que faire aujourd'hui ?", send: "Regarde mes candidatures et dis-moi les 3 actions les plus utiles à faire aujourd'hui." });
     return chips.slice(0, 4);
   }, [pathname, pipeline.inbox, pipeline.applications]);
 
@@ -482,10 +484,10 @@ export function AssistantConsole() {
         <button
           onClick={() => setOpen(true)}
           className="fixed bottom-5 right-5 z-50 flex items-center justify-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover max-sm:min-h-[44px]"
-          aria-label="Open assistant"
+          aria-label="Ouvrir l'assistant"
         >
           <CoMark size={26} />
-          <span className="text-sm font-medium">Ask</span>
+          <span className="text-sm font-medium">Demander</span>
         </button>
       )}
 
@@ -495,9 +497,9 @@ export function AssistantConsole() {
             <CoMark size={26} />
             <div className="flex-1">
               <div className="text-sm font-semibold tracking-tight">Assistant</div>
-              <div className="text-xs text-faint">{cliId ? `via ${cliId}` : "no CLI configured"}</div>
+              <div className="text-xs text-faint">{cliId ? `via ${cliId}` : "aucun CLI configuré"}</div>
             </div>
-            <Button variant="ghost" size="icon" onClick={resetChat} className="text-muted" aria-label="New chat" title="New chat">
+            <Button variant="ghost" size="icon" onClick={resetChat} className="text-muted" aria-label="Nouvelle conversation" title="Nouvelle conversation">
               <RotateCcw className="size-4" />
             </Button>
             <Button variant="ghost" size="icon" onClick={() => setOpen(false)} className="text-muted" aria-label="Close assistant">
@@ -556,7 +558,7 @@ export function AssistantConsole() {
               onClick={() => setOpen(false)}
               className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-border bg-surface/50 px-3 py-2 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
             >
-              <Settings className="size-3.5" /> Pick a CLI in Config to enable the assistant →
+              <Settings className="size-3.5" /> Choisissez un CLI dans la configuration pour activer l&apos;assistant →
             </Link>
           )}
 
@@ -571,7 +573,7 @@ export function AssistantConsole() {
                     send();
                   }
                 }}
-                placeholder={cliId ? "Ask anything…" : "Configure a CLI first"}
+                placeholder={cliId ? "Posez votre question…" : "Configurez d'abord un CLI"}
                 rows={1}
                 disabled={!cliId}
                 className="max-h-32 flex-1 resize-none rounded-xl border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 disabled:opacity-50"
@@ -580,7 +582,7 @@ export function AssistantConsole() {
                 onClick={() => send()}
                 disabled={busy || !input.trim() || !cliId}
                 className="rounded-xl bg-brand p-2 text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-40"
-                aria-label="Send"
+                aria-label="Envoyer"
               >
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
               </button>
@@ -619,7 +621,7 @@ function PartView({
     if (!job)
       return (
         <Link href={`/jobs/${part.jobId}`} className="block rounded-xl border border-border bg-surface/40 p-2.5 text-xs text-faint hover:text-foreground">
-          Worker finished earlier — open log →
+          Traitement terminé plus tôt — ouvrir le journal →
         </Link>
       );
     return (
@@ -627,7 +629,7 @@ function PartView({
         job={job}
         variant="inline"
         trailing={
-          <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Open worker">
+          <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Ouvrir le traitement">
             <ArrowUpRight className="size-3.5" />
           </Link>
         }
@@ -641,9 +643,9 @@ function PartView({
       <div className="rounded-xl border border-border bg-surface/40 p-2.5">
         <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
           <Sparkles className="size-3.5 text-brand" />
-          {part.jobIds.length} evaluations
+          {part.jobIds.length} évaluations
           <span className="ml-auto tabular-nums text-faint">
-            {done}/{part.jobIds.length} done
+            {done}/{part.jobIds.length} terminées
           </span>
         </div>
         <div className="space-y-1.5">
@@ -653,7 +655,7 @@ function PartView({
               job={j!}
               variant="inline"
               trailing={
-                <Link href={`/jobs/${j!.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Open worker">
+                <Link href={`/jobs/${j!.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Ouvrir le traitement">
                   <ArrowUpRight className="size-3.5" />
                 </Link>
               }
@@ -673,17 +675,17 @@ function PartView({
               onClick={() => onConfirm(part.cid, true)}
               className="rounded-full bg-brand px-3 py-1 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200"
             >
-              Confirm
+              Confirmer
             </button>
             <button
               onClick={() => onConfirm(part.cid, false)}
               className="rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
             >
-              Cancel
+              Annuler
             </button>
           </div>
         ) : (
-          <div className="mt-1 text-xs text-faint">{part.state === "done" ? "✓ started" : "cancelled"}</div>
+          <div className="mt-1 text-xs text-faint">{part.state === "done" ? "✓ lancé" : "annulé"}</div>
         )}
       </div>
     );

@@ -7,20 +7,27 @@ import { cn } from "@/lib/cn";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
+// Les CLÉS sont des noms d'outils de l'agent (identifiants) — jamais traduites.
 const STEP_LABELS: Record<string, string> = {
-  WebFetch: "Reading the posting",
-  WebSearch: "Searching the web",
-  Read: "Reading your CV & profile",
-  Glob: "Looking through your files",
-  Grep: "Looking through your files",
-  Write: "Writing the report",
-  Edit: "Updating the report",
-  NotebookEdit: "Updating the report",
-  Bash: "Saving to your tracker",
-  TodoWrite: "Planning the steps",
-  Task: "Working",
+  WebFetch: "Lecture de l'offre",
+  WebSearch: "Recherche sur le web",
+  Read: "Lecture de votre CV et de votre profil",
+  Glob: "Parcours de vos fichiers",
+  Grep: "Parcours de vos fichiers",
+  Write: "Rédaction du rapport",
+  Edit: "Mise à jour du rapport",
+  NotebookEdit: "Mise à jour du rapport",
+  Bash: "Enregistrement dans votre suivi",
+  TodoWrite: "Planification des étapes",
+  Task: "Traitement en cours",
 };
 const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
+
+/** Statut interne d'un traitement → libellé français. La valeur reste
+ *  "running" / "done" / "error" (persistée en localStorage). */
+export function jobStatusLabel(status: Job["status"]): string {
+  return status === "running" ? "en cours" : status === "done" ? "terminé" : "erreur";
+}
 
 // Auth/sign-in failures are the most common real error — detect them so we can give
 // a concrete next step instead of a dead end (#8).
@@ -123,17 +130,17 @@ export function WorkerCard({
       </div>
       {(bottom || running) && (
         <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}>
-          {running ? `${last ?? "Working"} · ${fmtElapsed(elapsed)}` : bottom}
+          {running ? `${last ?? "Traitement en cours"} · ${fmtElapsed(elapsed)}` : bottom}
         </div>
       )}
       {authError && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
-          Sign your CLI in from Config, then re-run.
+          Connectez votre CLI depuis la Configuration, puis relancez.
         </div>
       )}
       {tokens > 0 && (
         <div className={cn("mt-1 text-faint tabular-nums", inline ? "text-xs" : "text-[10px]")}>
-          {fmtTokens(tokens)} tokens{job.cost?.usd != null ? ` · $${job.cost.usd.toFixed(2)}` : ""}
+          {fmtTokens(tokens)} jetons{job.cost?.usd != null ? ` · ${job.cost.usd.toFixed(2)} $` : ""}
         </div>
       )}
     </div>

@@ -29,13 +29,14 @@ export function sourceFromUrl(url: string): AtsSource | null {
 // just untagged). We only ever surface buckets that actually appear in the data.
 export type Seniority = "lead" | "staff" | "senior" | "mid" | "junior" | "intern";
 export const SENIORITY_ORDER: Seniority[] = ["lead", "staff", "senior", "mid", "junior", "intern"];
+// Clés = identifiants internes (jamais traduites) ; valeurs = affichage.
 export const SENIORITY_LABEL: Record<Seniority, string> = {
-  lead: "Lead / Mgr",
-  staff: "Staff+",
-  senior: "Senior",
-  mid: "Mid",
+  lead: "Direction / Manager",
+  staff: "Expert",
+  senior: "Confirmé",
+  mid: "Intermédiaire",
   junior: "Junior",
-  intern: "Intern",
+  intern: "Stage / Alternance",
 };
 
 export function seniorityFromTitle(title: string): Seniority | null {
@@ -61,9 +62,9 @@ export function daysSince(iso: string | undefined, now: number): number | null {
 // Freshness windows mirror the Explore "posted within" segmented control so the two
 // surfaces feel like one system. A posting passes a window if its age ≤ the window.
 export const FRESHNESS_WINDOWS = [
-  { label: "24h", days: 1 },
-  { label: "3d", days: 3 },
-  { label: "7d", days: 7 },
-  { label: "14d", days: 14 },
-  { label: "30d", days: 30 },
+  { label: "24 h", days: 1 },
+  { label: "3 j", days: 3 },
+  { label: "7 j", days: 7 },
+  { label: "14 j", days: 14 },
+  { label: "30 j", days: 30 },
 ] as const;

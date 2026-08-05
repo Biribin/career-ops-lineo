@@ -21,6 +21,6 @@ export async function POST(req: Request) {
     const session = await openSession(url, body.cliId, body.agent, body._noApplyBtn);
     return Response.json(session);
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message.slice(0, 200) : "could not open the form" }, { status: 500 });
+    return Response.json({ error: e instanceof Error ? e.message.slice(0, 200) : "impossible d'ouvrir le formulaire" }, { status: 500 });
   }
 }

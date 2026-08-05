@@ -7,11 +7,13 @@ import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
-import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
+import { canonStatus, scoreNum, scoreTone, statusDot, statusLabel } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
+// Ces valeurs servent de paramètre d'URL (?tab=) ET sont comparées à
+// canonStatus() — jamais traduites. TAB_LABELS porte l'affichage.
 const TABS = [
   "INBOX",
   "ALL",
@@ -27,8 +29,32 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
+const TAB_LABELS: Record<Tab, string> = {
+  INBOX: "À trier",
+  ALL: "Toutes",
+  EVALUATED: "Évaluées",
+  APPLIED: "Envoyées",
+  RESPONDED: "Réponse reçue",
+  INTERVIEW: "Entretien",
+  OFFER: "Proposition",
+  HIRED: "Embauché",
+  REJECTED: "Refusées",
+  DISCARDED: "Écartées",
+  SKIP: "À ignorer",
+};
+
+// Clés de tri : paramètre d'URL (?sort=) ET accesseurs de propriété sur
+// Application — jamais traduites.
 const SORT_KEYS = ["company", "role", "score", "status", "date"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
+
+const SORT_LABELS: Record<SortKey, string> = {
+  company: "entreprise",
+  role: "poste",
+  score: "score",
+  status: "statut",
+  date: "date",
+};
 
 export function PipelineView({
   applications,
@@ -120,10 +146,10 @@ export function PipelineView({
     <div className="mx-auto max-w-6xl px-6 py-8 max-sm:pb-24">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl tracking-tight text-landing">Pipeline</h1>
+          <h1 className="font-display text-2xl tracking-tight text-landing">Candidatures</h1>
           <p className="mt-1 text-sm text-muted">
-            <span className="tabular-nums">{pendingInbox.length}</span> in inbox ·{" "}
-            <span className="tabular-nums">{applications.length}</span> tracked
+            <span className="tabular-nums">{pendingInbox.length}</span> à trier ·{" "}
+            <span className="tabular-nums">{applications.length}</span> suivies
           </p>
         </div>
         {/* the tracker has its own search; the inbox brings its own facet filters */}
@@ -133,7 +159,7 @@ export function PipelineView({
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search company or role…"
+              placeholder="Rechercher une entreprise ou un poste…"
               className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
             />
           </div>
@@ -160,7 +186,7 @@ export function PipelineView({
                   : "border-transparent text-muted hover:text-foreground",
               )}
             >
-              {t} <span className="text-faint tabular-nums">{count}</span>
+              {TAB_LABELS[t]} <span className="text-faint tabular-nums">{count}</span>
             </button>
           );
         })}
@@ -168,12 +194,12 @@ export function PipelineView({
 
       {tab !== "INBOX" && minFilter != null && (
         <div className="mt-3 flex items-center gap-2">
-          <span className="text-xs text-faint">Filtered:</span>
+          <span className="text-xs text-faint">Filtré :</span>
           <button
             type="button"
             onClick={() => setParams({ min: null })}
             className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
-            title="Clear score filter"
+            title="Retirer le filtre de score"
           >
             score ≥ {minFilter.toFixed(1)}
             <X className="size-3" />
@@ -201,7 +227,7 @@ export function PipelineView({
                     onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
                   >
                     <span className="inline-flex items-center gap-1">
-                      {k}
+                      {SORT_LABELS[k]}
                       <ChevronsUpDown className="size-3" />
                     </span>
                   </th>
@@ -226,7 +252,7 @@ export function PipelineView({
                   <td className="px-4 py-3 text-muted">
                     <span className="inline-flex items-center gap-1.5">
                       <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(r.status))} />
-                      {r.status}
+                      {statusLabel(r.status)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-faint tabular-nums">{r.date}</td>
@@ -237,8 +263,8 @@ export function PipelineView({
         </div>
       ) : (
         <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-          <p className="font-display text-lg">No matches</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
+          <p className="font-display text-lg">Aucun résultat</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Essayez un autre onglet ou effacez la recherche.</p>
         </div>
       )}
     </div>
@@ -251,8 +277,8 @@ function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
   if (filtered) {
     return (
       <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-        <p className="font-display text-lg">No matches</p>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Clear the search to see the full inbox.</p>
+        <p className="font-display text-lg">Aucun résultat</p>
+        <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Effacez la recherche pour revoir toute la file de tri.</p>
       </div>
     );
   }
@@ -262,25 +288,25 @@ function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
         <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
         <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
         <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
-        <span className="ml-3 font-mono text-xs tracking-wide text-muted">career-ops · inbox</span>
+        <span className="ml-3 font-mono text-xs tracking-wide text-muted">career-ops · à trier</span>
       </div>
       <div className="px-6 py-10 text-center">
         <p className="font-display text-lg">
-          Your <span className="text-brand">inbox</span> is empty.
+          Votre file <span className="text-brand">de tri</span> est vide.
         </p>
         {count > 0 ? (
-          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Nothing pending right now.</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Rien en attente pour le moment.</p>
         ) : (
           <>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Find roles that match your CV — free, no tokens spent.</p>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Trouvez des postes qui collent à votre CV — gratuitement, sans dépenser de jetons.</p>
             <Link
               href="/explore?run=1"
               className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-all duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
             >
-              <Compass className="size-4" /> Run your first free scan <ArrowRight className="size-4" />
+              <Compass className="size-4" /> Lancer votre premier scan gratuit <ArrowRight className="size-4" />
             </Link>
             <p className="mx-auto mt-4 max-w-sm text-xs text-muted">
-              Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, or add job URLs to{" "}
+              Vous préférez le terminal ? Lancez <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, ou ajoutez des URL d&apos;offres dans{" "}
               <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">data/pipeline.md</code>.
             </p>
           </>

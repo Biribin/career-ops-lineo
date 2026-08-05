@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
   } catch {
     return new Response("no output directory", { status: 404 });
   }
-  if (!files.length) return new Response("no tailored CV found for this offer", { status: 404 });
+  if (!files.length) return new Response("aucun CV adapté trouvé pour cette offre", { status: 404 });
 
   files.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
   const file = path.join(dir, files[0]);
@@ -40,6 +40,6 @@ export async function GET(req: NextRequest) {
       headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${files[0]}"`, "Cache-Control": "no-store" },
     });
   } catch {
-    return new Response("could not read the PDF", { status: 500 });
+    return new Response("impossible de lire le PDF", { status: 500 });
   }
 }

@@ -6,11 +6,11 @@ import { cn } from "@/lib/cn";
 import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
 
 const RECENCY = [
-  { label: "24h", days: 1 },
-  { label: "3d", days: 3 },
-  { label: "7d", days: 7 },
-  { label: "14d", days: 14 },
-  { label: "30d", days: 30 },
+  { label: "24 h", days: 1 },
+  { label: "3 j", days: 3 },
+  { label: "7 j", days: 7 },
+  { label: "14 j", days: 14 },
+  { label: "30 j", days: 30 },
 ];
 
 const STYLE = `
@@ -52,7 +52,7 @@ function KeywordField({
         <span key={v} className={cn("co-fb__chip", tone === "inc" ? "inc" : "border-border bg-surface-hover text-muted")}>
           {tone === "exc" && <Ban className="size-3 opacity-70" />}
           {v}
-          <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((x) => x !== v))}>
+          <button type="button" aria-label={`Retirer ${v}`} onClick={() => onChange(values.filter((x) => x !== v))}>
             <X className="size-3" />
           </button>
         </span>
@@ -120,23 +120,23 @@ export function FilterBuilder({
       <style>{STYLE}</style>
 
       <div>
-        <Label hint={filters.positive.length === 0 ? "empty = every fresh posting" : undefined}>Roles to find</Label>
-        <KeywordField values={filters.positive} tone="inc" placeholder="AI platform, ML infrastructure, staff engineer…" onChange={(v) => set({ positive: v })} />
+        <Label hint={filters.positive.length === 0 ? "vide = toutes les offres récentes" : undefined}>Postes à trouver</Label>
+        <KeywordField values={filters.positive} tone="inc" placeholder="plateforme IA, infrastructure ML, ingénieur expert…" onChange={(v) => set({ positive: v })} />
         {seededFrom.length > 0 && filters.positive.length > 0 && (
-          <p className="mt-1 text-[11px] text-faint">Seeded from your {seededFrom.join(" + ")} — edit freely.</p>
+          <p className="mt-1 text-[11px] text-faint">Amorcé depuis votre {seededFrom.join(" + ")} — modifiez librement.</p>
         )}
       </div>
 
       <div>
-        <Label>Exclude</Label>
-        <KeywordField values={filters.negative} tone="exc" placeholder="manager, sales, contract…" onChange={(v) => set({ negative: v })} />
+        <Label>Exclure</Label>
+        <KeywordField values={filters.negative} tone="exc" placeholder="manager, commercial, prestation…" onChange={(v) => set({ negative: v })} />
       </div>
 
       <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
         <div>
-          <Label hint="postings published in this window">
+          <Label hint="offres publiées dans cette fenêtre">
             <span className="inline-flex items-center gap-1.5">
-              <Clock className="size-3.5 text-muted" /> Posted within
+              <Clock className="size-3.5 text-muted" /> Publiées depuis
             </span>
           </Label>
           <div className="inline-flex rounded-lg border border-border bg-surface/40 p-0.5">
@@ -157,7 +157,7 @@ export function FilterBuilder({
         </div>
 
         <div>
-          <Label hint={filters.ats.length === 0 ? "pick at least one" : undefined}>Sources</Label>
+          <Label hint={filters.ats.length === 0 ? "choisissez-en au moins une" : undefined}>Sources</Label>
           <div className="flex flex-wrap gap-1.5">
             {ATS_SOURCES.map((a) => {
               const on = filters.ats.includes(a);
@@ -185,31 +185,31 @@ export function FilterBuilder({
         className="inline-flex items-center gap-1.5 text-[12px] text-muted hover:text-foreground transition-colors max-sm:min-h-[44px]"
       >
         <SlidersHorizontal className="size-3.5" />
-        Location &amp; scope
+        Lieu et périmètre
         <ChevronDown className={cn("size-3.5 transition-transform", advanced && "rotate-180")} />
       </button>
 
       {advanced && (
         <div className="space-y-3 rounded-xl border border-border bg-surface/30 p-3">
           <div className="flex items-center gap-1.5 text-[12px] text-muted">
-            <MapPin className="size-3.5" /> Location
+            <MapPin className="size-3.5" /> Lieu
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
-              <Label hint="rescues multi-loc posts">Always include</Label>
-              <KeywordField values={filters.alwaysAllow} tone="inc" placeholder="London…" onChange={(v) => set({ alwaysAllow: v })} />
+              <Label hint="rattrape les offres multi-lieux">Toujours inclure</Label>
+              <KeywordField values={filters.alwaysAllow} tone="inc" placeholder="Paris…" onChange={(v) => set({ alwaysAllow: v })} />
             </div>
             <div>
-              <Label>Only in</Label>
-              <KeywordField values={filters.allow} tone="inc" placeholder="Remote, EMEA…" onChange={(v) => set({ allow: v })} />
+              <Label>Uniquement à</Label>
+              <KeywordField values={filters.allow} tone="inc" placeholder="Télétravail, Île-de-France…" onChange={(v) => set({ allow: v })} />
             </div>
             <div>
-              <Label>Never in</Label>
-              <KeywordField values={filters.block} tone="exc" placeholder="India…" onChange={(v) => set({ block: v })} />
+              <Label>Jamais à</Label>
+              <KeywordField values={filters.block} tone="exc" placeholder="Inde…" onChange={(v) => set({ block: v })} />
             </div>
           </div>
           <div>
-            <Label hint={`${filters.limitPerAts} companies / source`}>Scan depth</Label>
+            <Label hint={`${filters.limitPerAts} entreprises / source`}>Profondeur de scan</Label>
             <input
               type="range"
               min={50}
