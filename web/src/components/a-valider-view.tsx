@@ -383,15 +383,23 @@ function Apercu({ fiche }: { fiche: Fiche }) {
             Voir ce qui sera envoyé
           </summary>
           <div className="mt-3 space-y-3 rounded-lg border border-border bg-surface/60 p-3 text-xs leading-relaxed">
+            <p className="font-medium text-faint">Lettre de motivation</p>
             {fiche.salutation && <p className="text-muted">{fiche.salutation}</p>}
-            {paragraphes.map((p, i) => (
-              <p key={i} className="text-foreground/90">
-                {p}
+            {aLettre ? (
+              paragraphes.map((p, i) => (
+                <p key={i} className="text-foreground/90">
+                  {p}
+                </p>
+              ))
+            ) : (
+              <p className="italic text-faint">
+                Corps de la lettre indisponible pour cette candidature (préparée avant l&apos;aperçu complet).
+                Relance une candidature pour voir la lettre entière.
               </p>
-            ))}
+            )}
             {args.length > 0 && (
               <div className="border-t border-border pt-2">
-                <p className="mb-1 text-faint">Arguments clés</p>
+                <p className="mb-1 text-faint">Arguments clés (résumé, ce n&apos;est pas la lettre)</p>
                 <ul className="list-disc space-y-0.5 pl-4 text-muted">
                   {args.map((a, i) => (
                     <li key={i}>{a}</li>
