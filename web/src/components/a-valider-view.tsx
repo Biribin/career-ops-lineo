@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, FileText, Loader2, Mail, PenLine, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink, Eye, FileText, Loader2, Mail, PenLine, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
 
@@ -16,6 +16,12 @@ type Fiche = {
   url_offre?: string;
   courriel_contact?: string;
   objet_mail?: string;
+  salutation?: string;
+  apercu_lettre?: string;
+  arguments_cles?: string[] | string;
+  pourquoi_ca_matche?: string;
+  cv_url?: string;
+  lettre_url?: string;
   branche_github?: string;
   decision_url?: string;
   decidable: boolean;
@@ -255,6 +261,8 @@ function Carte({ fiche, onDecide }: { fiche: Fiche; onDecide: () => void }) {
         )}
       </div>
 
+      <Apercu fiche={fiche} />
+
       {!fiche.decidable && (
         <p className="mx-4 mb-3 flex items-center gap-2 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs text-muted">
           <Loader2 className="size-3.5 animate-spin" />
@@ -320,6 +328,79 @@ function Carte({ fiche, onDecide }: { fiche: Fiche; onDecide: () => void }) {
         <p className="border-t border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-700 dark:text-emerald-400">
           {succes}
         </p>
+      )}
+    </div>
+  );
+}
+
+function Apercu({ fiche }: { fiche: Fiche }) {
+  const args = Array.isArray(fiche.arguments_cles)
+    ? fiche.arguments_cles
+    : String(fiche.arguments_cles ?? "")
+        .split(/\n|(?:^|\s)[-•]\s/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+  const paragraphes = String(fiche.apercu_lettre ?? "")
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const aLettre = paragraphes.length > 0;
+  const aDocs = Boolean(fiche.cv_url || fiche.lettre_url);
+
+  if (!aLettre && !aDocs && args.length === 0) return null;
+
+  return (
+    <div className="border-t border-border px-4 py-3">
+      {aDocs && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {fiche.cv_url && (
+            <a
+              href={fiche.cv_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[40px]"
+            >
+              <FileText className="size-3.5" /> Voir le CV <ExternalLink className="size-3" />
+            </a>
+          )}
+          {fiche.lettre_url && (
+            <a
+              href={fiche.lettre_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[40px]"
+            >
+              <Mail className="size-3.5" /> Voir la lettre <ExternalLink className="size-3" />
+            </a>
+          )}
+        </div>
+      )}
+
+      {(aLettre || args.length > 0) && (
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground">
+            <Eye className="size-3.5" />
+            Voir ce qui sera envoyé
+          </summary>
+          <div className="mt-3 space-y-3 rounded-lg border border-border bg-surface/60 p-3 text-xs leading-relaxed">
+            {fiche.salutation && <p className="text-muted">{fiche.salutation}</p>}
+            {paragraphes.map((p, i) => (
+              <p key={i} className="text-foreground/90">
+                {p}
+              </p>
+            ))}
+            {args.length > 0 && (
+              <div className="border-t border-border pt-2">
+                <p className="mb-1 text-faint">Arguments clés</p>
+                <ul className="list-disc space-y-0.5 pl-4 text-muted">
+                  {args.map((a, i) => (
+                    <li key={i}>{a}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </details>
       )}
     </div>
   );

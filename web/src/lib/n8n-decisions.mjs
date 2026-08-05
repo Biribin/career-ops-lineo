@@ -32,10 +32,13 @@ import path from "node:path";
  * @property {string} [pourquoi_ca_matche]
  * @property {string} [objet_mail]
  * @property {string} [salutation]
+ * @property {string} [apercu_lettre]
  * @property {string[]|string} [arguments_cles]
  * @property {string} [branche_github]
  * @property {string} [cv_pdf]
  * @property {string} [lettre_docx]
+ * @property {string} [cv_url]
+ * @property {string} [lettre_url]
  */
 
 /**
