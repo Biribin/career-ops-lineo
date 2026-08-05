@@ -23,6 +23,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates tini \
  && rm -rf /var/lib/apt/lists/*
 
+# Claude Code CLI : l'app le lance en headless (route /api/explore/ai) pour la
+# recherche IA, avec l'abonnement Max de Lineo via CLAUDE_CODE_OAUTH_TOKEN (env
+# Coolify) + CAREER_OPS_CLI=claude. Sans ce binaire, resolveCli('claude') echoue.
+RUN npm install -g @anthropic-ai/claude-code
+
 WORKDIR /app
 
 # Deps racine (pour les .mjs career-ops appeles par l'app). NODE_ENV non fige
