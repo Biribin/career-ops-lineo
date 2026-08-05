@@ -1,0 +1,3 @@
+# Les scripts shell doivent rester en LF : docker-entrypoint-web.sh est copie tel
+# quel dans une image Linux, et un CRLF y donne « bad interpreter: no such file ».
+*.sh text eol=lf
