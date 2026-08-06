@@ -32,6 +32,12 @@ type Fiche = {
 type Reponse = {
   fiches: Fiche[];
   repo: { racine: string; present: boolean; inbox: string };
+  /** « local » = clone du repo cv ; « github » = lecture par l'API contents. */
+  mode?: "local" | "github";
+  origine?: string;
+  erreur?: string | null;
+  tronquees?: number;
+  illisibles?: number;
   pull: { ok: boolean; sortie: string } | null;
 };
 
@@ -86,7 +92,12 @@ export function AValiderView() {
           {sync ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
           Récupérer les nouvelles candidatures
         </button>
-        {sync && <span className="text-xs text-faint">git pull sur le repo cv…</span>}
+        {sync && (
+          <span className="text-xs text-faint">
+            {res?.mode === "github" ? "lecture de l’inbox sur GitHub…" : "git pull sur le repo cv…"}
+          </span>
+        )}
+        {!sync && res?.origine && <span className="text-xs text-faint">Source : {res.origine}</span>}
       </div>
 
       <p className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm">
@@ -105,11 +116,29 @@ export function AValiderView() {
         </p>
       )}
 
-      {res && !res.repo.present && (
+      {res && !res.repo.present && res.mode !== "github" && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
           Le clone du repo <code className="text-foreground">cv</code> est introuvable à{" "}
           <code className="text-foreground">{res.repo.racine}</code>. C&apos;est là que n8n dépose les fiches. Définis{" "}
-          <code className="text-foreground">CV_REPO_ROOT</code> si ton clone est ailleurs.
+          <code className="text-foreground">CV_REPO_ROOT</code> si ton clone est ailleurs, ou{" "}
+          <code className="text-foreground">CV_GITHUB_TOKEN</code> pour lire l&apos;inbox directement sur GitHub (c&apos;est
+          le mode prévu quand career-ops tourne en conteneur, sans clone).
+        </p>
+      )}
+
+      {res?.erreur && res.mode === "github" && (
+        <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
+          <span className="font-medium text-amber-700 dark:text-amber-400">Lecture de l&apos;inbox impossible</span>{" "}
+          <span className="text-muted">
+            — la liste ci-dessous n&apos;est pas fiable, ne conclus pas qu&apos;il n&apos;y a rien à valider.
+          </span>
+          <code className="mt-1 block whitespace-pre-wrap break-all text-xs text-faint">{res.erreur}</code>
+        </p>
+      )}
+
+      {res && (res.tronquees ?? 0) > 0 && (
+        <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-muted">
+          {res.tronquees} fiche(s) au-delà du plafond de lecture ne sont pas affichées ici.
         </p>
       )}
 

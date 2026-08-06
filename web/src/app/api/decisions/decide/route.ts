@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
-import { inboxDir, journalPath } from "@/lib/n8n-decisions";
+import { journalPath } from "@/lib/n8n-decisions";
+import { lireInbox } from "@/lib/cv-inbox";
 import { trackCompanyInPortals, type PortailTrackResult } from "@/lib/portals-track";
 import {
   ajouterAuJournal,
   dejaClose,
   estDecision,
-  lireFiches,
   lireJournal,
   type Decision,
   type Fiche,
@@ -147,8 +147,20 @@ export async function POST(req: Request) {
     return Response.json({ error: "une consigne est obligatoire pour demander une retouche" }, { status: 400 });
   }
 
-  const fiche = lireFiches(inboxDir()).find((f: Fiche) => f.id === id);
-  if (!fiche) return Response.json({ error: `aucune fiche n8n pour l'id « ${id} »` }, { status: 404 });
+  // Même source que la liste : sans ça, une fiche visible sur la page serait
+  // introuvable au moment de décider (et l'exécution n8n resterait parquée).
+  const source = await lireInbox();
+  const fiche = source.fiches.find((f: Fiche) => f.id === id);
+  if (!fiche) {
+    return Response.json(
+      {
+        error: source.erreur
+          ? `impossible de lire les fiches (${source.origine}) : ${source.erreur}`
+          : `aucune fiche n8n pour l'id « ${id} »`,
+      },
+      { status: source.erreur ? 502 : 404 },
+    );
+  }
 
   // Anti double-clic : une décision terminale déjà transmise a consommé la
   // porte. Re-POSTer tomberait de toute façon sur une URL qui n'attend plus.
