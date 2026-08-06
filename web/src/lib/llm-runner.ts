@@ -48,8 +48,21 @@ export async function executeLlm(prompt: string, cliIdDemande?: string): Promise
     return { ok: false, message: `CLI '${cliId}' introuvable sur cette machine`, status: 503 };
   }
 
-  // La rotation de comptes n'a de sens que pour Claude (jeton d'abonnement).
-  const comptes = cliId === CLI_DEFAUT ? comptesDisponibles(process.env) : [{ id: "compte-1", varJeton: null }];
+  // BASCULE SUR PLAFOND : DÉSACTIVÉE PAR DÉFAUT, ET C'EST VOULU.
+  //
+  // La règle de Linéo (brief de rotation du 2026-08-06) : « la rotation sert à
+  // pointer vers le compte au meilleur plan ou à remplacer un jeton révoqué, PAS
+  // à contourner les limites ». Le 2026-08-06 a montré pourquoi elle a raison :
+  // les deux jetons du conteneur n8n butaient sur le même plafond hebdomadaire
+  // parce que ces comptes n'ont pas le bon abonnement. Une bascule automatique
+  // aurait glissé du compte 1 au compte 2 sans bruit, et la vraie cause — un
+  // jeton qui pointe vers un compte au mauvais plan — serait restée invisible.
+  //
+  // Donc par défaut : un plafond remonte en 429, tout de suite, avec son message.
+  // Mettre LLM_BASCULE_SUR_PLAFOND=1 pour enchaîner les comptes malgré tout.
+  const bascule = String(process.env.LLM_BASCULE_SUR_PLAFOND ?? "").trim() === "1";
+  const tous = cliId === CLI_DEFAUT ? comptesDisponibles(process.env) : [{ id: "compte-1", varJeton: null }];
+  const comptes = bascule ? tous : tous.slice(0, 1);
 
   let dernierPlafond = "";
   for (const compte of comptes) {
@@ -76,9 +89,11 @@ export async function executeLlm(prompt: string, cliIdDemande?: string): Promise
     ok: false,
     status: 429,
     message:
-      `tous les comptes Claude sont plafonnes (${comptes.length} essaye(s)) : ` +
+      `plafond atteint (${comptes.length} compte(s) essaye(s)) : ` +
       (dernierPlafond || "plafond atteint") +
-      ". Ajouter CLAUDE_CODE_OAUTH_TOKEN_2 dans Coolify, ou attendre la reinitialisation.",
+      ". Verifier que le jeton actif pointe vers un compte au bon abonnement " +
+      "(c'etait la cause reelle le 2026-08-06, pas un manque de quota). " +
+      (bascule ? "" : "LLM_BASCULE_SUR_PLAFOND=1 pour enchainer les comptes."),
   };
 }
 
