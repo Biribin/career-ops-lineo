@@ -83,9 +83,34 @@ function transmise(d) {
 }
 
 /**
- * Lit toutes les fiches déposées par n8n. Un fichier illisible ou hors-schéma
- * est ignoré : le dossier est aussi un dossier git (README, .jsonl…), et une
- * fiche corrompue ne doit pas faire disparaître les autres de l'écran.
+ * Valide UN texte JSON comme fiche n8n. Le schéma est le contrat : sans lui,
+ * ce n'est pas une fiche. Renvoie null au lieu de jeter, parce qu'une fiche
+ * corrompue ne doit pas faire disparaître les autres de l'écran.
+ *
+ * Extrait de `lireFiches` pour être réutilisé par la source GitHub
+ * (cv-inbox.mjs) : les deux sources doivent appliquer EXACTEMENT le même filtre,
+ * sinon une fiche visible en local serait invisible sur le VPS, ou l'inverse.
+ *
+ * @param {string} brut
+ * @returns {Fiche|null}
+ */
+export function parseFiche(brut) {
+  let f;
+  try {
+    f = JSON.parse(brut);
+  } catch {
+    return null;
+  }
+  if (!f || typeof f !== "object") return null;
+  if (!String(f.schema ?? "").startsWith("career-ops-inbox/")) return null;
+  if (!f.id || typeof f.id !== "string") return null;
+  return f;
+}
+
+/**
+ * Lit toutes les fiches déposées par n8n dans un clone local du repo cv. Un
+ * fichier illisible ou hors-schéma est ignoré : le dossier est aussi un dossier
+ * git (README, .jsonl…).
  *
  * @param {string} inboxDir
  * @returns {Fiche[]}
@@ -106,16 +131,8 @@ export function lireFiches(inboxDir) {
     } catch {
       continue;
     }
-    try {
-      const f = JSON.parse(brut);
-      // Le schéma est le contrat : sans lui, ce n'est pas une fiche n8n.
-      if (!f || typeof f !== "object") continue;
-      if (!String(f.schema ?? "").startsWith("career-ops-inbox/")) continue;
-      if (!f.id || typeof f.id !== "string") continue;
-      out.push(f);
-    } catch {
-      continue;
-    }
+    const f = parseFiche(brut);
+    if (f) out.push(f);
   }
   return out;
 }
@@ -190,7 +207,19 @@ export function dejaClose(journal, id) {
  * @returns {FicheEnAttente[]}
  */
 export function fichesEnAttente(inboxDir, journalPath) {
-  const journal = lireJournal(journalPath);
+  return fichesEnAttenteDepuis(lireFiches(inboxDir), lireJournal(journalPath));
+}
+
+/**
+ * Même logique que `fichesEnAttente`, mais sur des fiches DÉJÀ lues. C'est le
+ * cœur pur : il ne connaît ni le disque ni le réseau, donc il est partagé par la
+ * source « clone local » et la source « API GitHub » (cf. cv-inbox.mjs).
+ *
+ * @param {Fiche[]} toutesLesFiches
+ * @param {Journal[]} journal
+ * @returns {FicheEnAttente[]}
+ */
+export function fichesEnAttenteDepuis(toutesLesFiches, journal) {
   const parId = new Map();
   for (const j of journal) {
     const liste = parId.get(j.id) ?? [];
@@ -199,7 +228,7 @@ export function fichesEnAttente(inboxDir, journalPath) {
   }
 
   const out = [];
-  for (const f of lireFiches(inboxDir)) {
+  for (const f of toutesLesFiches) {
     const decisions = parId.get(f.id) ?? [];
     if (dejaClose(decisions, f.id)) continue;
 
