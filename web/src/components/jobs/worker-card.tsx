@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, X, Loader2, AlertTriangle } from "lucide-react";
+import { Check, X, Loader2, AlertTriangle, MoonStar } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 
@@ -23,10 +23,13 @@ const STEP_LABELS: Record<string, string> = {
 };
 const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
 
-/** Statut interne d'un traitement → libellé français. La valeur reste
- *  "running" / "done" / "error" (persistée en localStorage). */
+/** Statut interne d'un traitement → libellé français. La valeur brute
+ *  ("running" / "done" / "error" / "detached") est persistée en localStorage. */
 export function jobStatusLabel(status: Job["status"]): string {
-  return status === "running" ? "en cours" : status === "done" ? "terminé" : "erreur";
+  if (status === "running") return "en cours";
+  if (status === "done") return "terminé";
+  if (status === "detached") return "en arrière-plan";
+  return "erreur";
 }
 
 // Auth/sign-in failures are the most common real error — detect them so we can give
@@ -72,6 +75,8 @@ export const TONE = {
 export function pillTone(j: Job): keyof typeof TONE {
   if (j.status === "error") return "bad";
   if (j.status === "done") return j.result?.tone ?? "muted";
+  // "detached" reste neutre : on ignore le résultat, on n'a pas le droit de le
+  // peindre en rouge (rien n'a échoué) ni en vert (rien n'est confirmé).
   return "muted";
 }
 
@@ -102,6 +107,8 @@ export function WorkerCard({
           <Loader2 className="size-3 shrink-0 animate-spin text-brand" />
         ) : job.status === "error" ? (
           <AlertTriangle className={cn("size-3 shrink-0", tone.icon)} />
+        ) : job.status === "detached" ? (
+          <MoonStar className={cn("size-3 shrink-0", tone.icon)} />
         ) : (
           <Check className={cn("size-3 shrink-0", tone.icon)} />
         )}
@@ -136,6 +143,11 @@ export function WorkerCard({
       {authError && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           Connectez votre CLI depuis la Configuration, puis relancez.
+        </div>
+      )}
+      {job.status === "detached" && (
+        <div className={cn("mt-1 text-muted", inline ? "text-xs" : "text-[10px]")}>
+          Le suivi en direct s’est arrêté avec l’onglet, pas le traitement. Le résultat apparaîtra dans vos candidatures — inutile de relancer.
         </div>
       )}
       {tokens > 0 && (

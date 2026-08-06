@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Check, AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import { Check, AlertTriangle, Loader2, Trash2, MoonStar } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { pillTone } from "@/components/jobs/worker-pills";
 import { jobStatusLabel } from "@/components/jobs/worker-card";
@@ -53,6 +53,8 @@ export default function JobsHistory() {
                     <Loader2 className="size-4 shrink-0 animate-spin text-brand" />
                   ) : j.status === "error" ? (
                     <AlertTriangle className="size-4 shrink-0 text-red-400" />
+                  ) : j.status === "detached" ? (
+                    <MoonStar className="size-4 shrink-0 text-muted" />
                   ) : (
                     <Check className="size-4 shrink-0 text-emerald-500" />
                   )}

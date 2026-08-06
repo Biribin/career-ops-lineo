@@ -221,13 +221,16 @@ export async function POST(req: Request) {
         if (closed) return;
         try { controller.enqueue(enc.encode(JSON.stringify(obj) + "\n")); } catch { closed = true; }
       };
+      // Le nettoyage (timer, writeToken) est INCONDITIONNEL : après un
+      // rechargement de page, `closed` vaut déjà true alors que l'enfant tourne
+      // encore, et c'est justement sa fermeture qui nous ramène ici. Le garder
+      // sous `if (!closed)` faisait fuiter le jeton d'écriture du tracker.
       const finalize = () => {
-        if (!closed) {
-          closed = true;
-          if (killer) clearTimeout(killer);
-          releaseWriteTokenOnce();
-          try { controller.close(); } catch { /* */ }
-        }
+        if (killer) { clearTimeout(killer); killer = undefined; }
+        releaseWriteTokenOnce();
+        if (closed) return;
+        closed = true;
+        try { controller.close(); } catch { /* */ }
       };
 
       // Run ONE attempt of the chain. Resolves true when it produced a clean, real
@@ -445,16 +448,30 @@ export async function POST(req: Request) {
         if (!pdfRenderPromise) finalize();
       })();
     },
+    // Déconnexion du client — typiquement l'onglet rechargé, fermé, ou une
+    // navigation. On coupe le flux, PAS le travail.
+    //
+    // Avant, on envoyait un SIGTERM à l'enfant ici : recharger la page tuait
+    // l'évaluation en cours. Or « evaluate » persiste lui-même ses artefacts
+    // canoniques (reserve-report-num → reports/{num}-… → batch/tracker-additions
+    // → merge-tracker → data/applications.md). Tuer l'agent à mi-chemin jetait
+    // des jetons déjà dépensés et pouvait laisser un numéro de rapport réservé
+    // sans ligne de tracker — un état qu'aucun écran ne rattrape.
+    //
+    // On laisse donc l'enfant finir et écrire. La borne dure reste le timer
+    // `killer` (285 s / 600 s en pdf), volontairement NON annulé ici : sans lui,
+    // un agent bloqué survivrait indéfiniment à l'onglet qui l'a lancé.
+    // `closed` suffit à rendre send() inerte, et le handler `close` de l'enfant
+    // libère writeToken via finalize().
     cancel() {
       closed = true;
-      if (killer) clearTimeout(killer);
-      try { activeChild?.kill("SIGTERM"); } catch { /* ignore */ }
       if (pdfRenderPromise) {
         // Render/mark keeps running after this client disconnects — wait for
         // it to settle before releasing the guard, so a concurrent tracker
         // delete can't race mark-pdf-ready.mjs's still-in-flight write.
         pdfRenderPromise.finally(releaseWriteTokenOnce);
-      } else {
+      } else if (!activeChild) {
+        // Aucun enfant en vol : plus personne ne passera par finalize().
         releaseWriteTokenOnce();
       }
     },

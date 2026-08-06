@@ -14,7 +14,12 @@ export type Job = {
   input?: string; // the URL/posting it processed (links inbox rows to their worker)
   kind?: string;
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
-  status: "running" | "done" | "error";
+  /** "detached" = la page a été rechargée pendant le traitement. Le flux live est
+   *  perdu (il n'existait que dans l'onglet précédent) mais le run CONTINUE côté
+   *  serveur et écrit lui-même son rapport + sa ligne de tracker — voir le
+   *  commentaire de cancel() dans api/run/route.ts. Ce n'est donc ni une erreur
+   *  ni un succès : c'est un résultat qu'il faut aller chercher ailleurs. */
+  status: "running" | "done" | "error" | "detached";
   steps: JobStep[];
   text: string;
   result?: JobResult;
@@ -67,8 +72,22 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(JOBS_KEY);
       const arr = raw ? JSON.parse(raw) : null;
       if (Array.isArray(arr)) {
-        // anything left "running" from a previous session is stale → mark interrupted
-        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrompu (page rechargée)", ts: Date.now() }] } : j)));
+        // Un job resté "running" appartient à l'onglet précédent : son flux est
+        // définitivement perdu. Le TRAITEMENT, lui, continue côté serveur (le
+        // rechargement ne le tue plus) — on le marque donc "detached" et non
+        // "error", qui affirmerait à tort qu'il ne s'est rien passé.
+        setJobs(
+          arr.map((j: Job) =>
+            j.status === "running"
+              ? {
+                  ...j,
+                  status: "detached",
+                  endedAt: Date.now(),
+                  steps: [...(j.steps || []), { kind: "status", label: "Page rechargée — le traitement continue en arrière-plan", ts: Date.now() }],
+                }
+              : j,
+          ),
+        );
       }
     } catch {
       /* ignore */

@@ -4,7 +4,7 @@ import { use } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X } from "lucide-react";
+import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, MoonStar } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +41,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               <><Loader2 className="size-3 animate-spin text-brand" /> en cours</>
             ) : job.status === "done" ? (
               <><Check className="size-3 text-emerald-500" /> terminé</>
+            ) : job.status === "detached" ? (
+              <><MoonStar className="size-3 text-muted" /> en arrière-plan</>
             ) : (
               <><X className="size-3 text-red-400" /> erreur</>
             )}
@@ -72,6 +74,13 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         {job.status === "running" && (
           <li className="flex items-center gap-2.5 text-sm text-muted">
             <Loader2 className="size-3.5 animate-spin text-brand" /> réflexion…
+          </li>
+        )}
+        {job.status === "detached" && (
+          <li className="flex items-start gap-2.5 text-sm text-muted">
+            <MoonStar className="mt-0.5 size-3.5 shrink-0" />
+            Le suivi en direct s’est arrêté avec l’onglet, pas le traitement. L’agent écrit lui-même son rapport et sa
+            ligne de suivi : le résultat apparaîtra dans vos candidatures. Inutile de relancer.
           </li>
         )}
       </ol>
