@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, FileText, Loader2 } from "lucide-react";
+import { Check, X, FileText, Loader2, ExternalLink, Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
@@ -18,6 +18,32 @@ export function DecisionCard({ app }: { app: Application }) {
   const [done, setDone] = useState<string | null>(null);
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
+
+  // Le tracker n'a PAS de colonne URL : ses champs sont n, date, company, via,
+  // role, score, status, pdf, report, notes. L'annonce n'y est donc nulle part,
+  // et cette carte n'avait aucun lien a afficher. On la retrouve depuis l'inbox
+  // du scanner, ou l'URL existe encore, via /api/offer-link.
+  //
+  // Cet endpoint ne rend une URL « exacte » que si la correspondance est
+  // CERTAINE ; sinon il rend un lien de recherche, et on l'affiche comme tel.
+  // Envoyer Lineo lire la mauvaise annonce avant de decider serait pire que ne
+  // rien lui donner.
+  const [lien, setLien] = useState<{ url: string; certitude: string; nbCandidats: number } | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams({ company: app.company ?? "", role: app.role ?? "" });
+    let vivant = true;
+    fetch(`/api/offer-link?${q}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (vivant && j?.url) setLien(j);
+      })
+      .catch(() => {
+        /* pas de lien : la carte reste utilisable sans */
+      });
+    return () => {
+      vivant = false;
+    };
+  }, [app.company, app.role]);
 
   const setStatus = async (status: "Applied" | "Discarded") => {
     setBusy(status);
@@ -41,6 +67,31 @@ export function DecisionCard({ app }: { app: Application }) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-foreground">{app.company}</p>
           <p className="truncate text-[13px] text-muted">{app.role}</p>
+          {lien && (
+            <a
+              href={lien.url}
+              target="_blank"
+              rel="noreferrer"
+              title={
+                lien.certitude === "exacte"
+                  ? "Ouvrir l’annonce"
+                  : lien.nbCandidats > 1
+                    ? `${lien.nbCandidats} offres de cette entreprise : impossible de savoir laquelle. Recherche pré-remplie.`
+                    : "Annonce introuvable dans l’inbox : recherche pré-remplie."
+              }
+              className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
+            >
+              {lien.certitude === "exacte" ? (
+                <>
+                  <ExternalLink className="size-3" /> Voir l&rsquo;annonce
+                </>
+              ) : (
+                <>
+                  <Search className="size-3" /> Chercher l&rsquo;annonce
+                </>
+              )}
+            </a>
+          )}
         </div>
         {Number.isFinite(score) && score > 0 && (
           <span
