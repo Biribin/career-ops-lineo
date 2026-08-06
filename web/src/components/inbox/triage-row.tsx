@@ -47,6 +47,9 @@ export function TriageRow({
 }) {
   const ago = agoLabel(age);
   const evaluated = !!scored && (scored.running || scored.score != null);
+  // Un post du forum n8n → on répond par un message (pas de CV/lettre). Les
+  // offres classiques passent par le flux d'évaluation/candidature habituel.
+  const isN8n = (job.url || "").includes("community.n8n.io");
 
   // Génération d'un brouillon de réponse (message d'approche) via /api/offer-reply
   // (Claude Code / Max). Panneau de résultat inline + copie. Le fetch est
@@ -145,17 +148,19 @@ export function TriageRow({
             </a>
           )}
 
-          {/* Générer une réponse (message d'approche) via Max */}
-          <button
-            type="button"
-            onClick={generateReply}
-            disabled={gen}
-            title="Générer une réponse"
-            className="inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-hover hover:text-brand disabled:opacity-60 max-sm:min-h-[44px]"
-          >
-            {gen ? <Loader2 className="size-4 animate-spin" /> : <MessageSquarePlus className="size-4" />}
-            <span className="max-sm:hidden">{gen ? "…" : "Réponse"}</span>
-          </button>
+          {/* Générer une réponse (message d'approche) via Max — posts n8n uniquement */}
+          {isN8n && (
+            <button
+              type="button"
+              onClick={generateReply}
+              disabled={gen}
+              title="Générer une réponse au post n8n"
+              className="inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-hover hover:text-brand disabled:opacity-60 max-sm:min-h-[44px]"
+            >
+              {gen ? <Loader2 className="size-4 animate-spin" /> : <MessageSquarePlus className="size-4" />}
+              <span className="max-sm:hidden">{gen ? "…" : "Réponse"}</span>
+            </button>
+          )}
 
           {/* EVALUADA state OU actions save/skip */}
           {evaluated ? (
