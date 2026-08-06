@@ -1,4 +1,4 @@
-import { LayoutDashboard, Compass, History, ListChecks, Send, Radar, BarChart3, PieChart, FileText, Settings, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Compass, History, ListChecks, Send, Radar, BarChart3, PieChart, FileText, Settings, ShieldCheck, MessageSquare } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 
 // Single source of truth for the app's primary destinations — shared by the
@@ -17,6 +17,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/explore", label: "Explorer", icon: Compass, chip: "Nouveau" },
   { href: "/a-valider", label: "À valider", icon: ShieldCheck },
   { href: "/pipeline", label: "Candidatures", icon: ListChecks },
+  { href: "/reponses", label: "Réponses n8n", icon: MessageSquare },
   // Deux destinations, deux questions : /relances ne montre que ce qui est dû
   // (la file d'action, même contrat que n8n), /followups reste le tracker complet
   // avec l'historique, les dates épinglées et le réglage de cadence.

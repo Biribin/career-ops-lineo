@@ -69,6 +69,14 @@ export function TriageRow({
       });
       const data = (await res.json()) as { text?: string; error?: string };
       setReply(data.text || data.error || "(réponse vide)");
+      // Enregistre le brouillon dans le module « Réponses n8n » (suivi + relance).
+      if (data.text) {
+        void fetch("/api/n8n-replies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "save", url: job.url, titre: job.role, company: job.company, message: data.text }),
+        });
+      }
     } catch (e) {
       setReply(e instanceof Error ? e.message : "échec de la génération");
     } finally {
