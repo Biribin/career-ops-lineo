@@ -50,8 +50,15 @@ function entier(v) {
  * comme « 0 % » il se lirait comme un échec.
  *
  * @param {ContratStats|null} stats
+ * `aDesDonnees` (le tracker EXISTE) et `total` (il a des lignes) sont deux
+ * questions différentes, et il a fallu les séparer : depuis que le tracker est
+ * amorcé vide, le cas courant est « fichier présent, zéro ligne ». Sans `total`,
+ * cet état s'affiche en quatre zéros nus — indiscernable d'un système qui tourne
+ * sans rien produire, alors qu'il veut juste dire « rien n'est encore parti ».
+ *
  * @returns {{
  *   aDesDonnees: boolean,
+ *   total: number|null,
  *   envoyees: number|null,
  *   enAttente: number|null,
  *   enAttenteFroides: number|null,
@@ -77,6 +84,7 @@ export function chiffresCles(stats) {
 
   return {
     aDesDonnees: Boolean(tracker),
+    total: tracker ? (entier(tracker.total) ?? 0) : null,
     envoyees,
     enAttente,
     enAttenteFroides: tracker ? entier(tracker.activeAppsCold) : null,

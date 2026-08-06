@@ -42,14 +42,26 @@ export default async function StatsPage() {
         </p>
       )}
 
-      {/* Le cas de loin le plus fréquent au démarrage : aucun tracker. Le dire
-          explicitement, plutôt que d'afficher quatre zéros qui ressembleraient à
-          un système qui tourne pour rien. */}
+      {/* Deux états vides à ne pas confondre — dans les deux cas, quatre zéros
+          nus ressembleraient à un système qui tourne pour rien. */}
       {!error && !cles.aDesDonnees && (
         <p className="mt-5 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
           Aucune candidature enregistrée pour l&apos;instant : le tracker{" "}
           <code className="text-foreground">data/applications.md</code> n&apos;existe pas encore. Il se crée à la
           première candidature envoyée. Les offres repérées, elles, sont dans{" "}
+          <Link href="/pipeline" className="text-brand hover:underline">
+            Candidatures
+          </Link>
+          .
+        </p>
+      )}
+
+      {/* Le tracker existe mais n'a pas encore de ligne — l'état normal entre
+          l'amorçage du fichier et le premier envoi. */}
+      {!error && cles.aDesDonnees && cles.total === 0 && (
+        <p className="mt-5 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
+          Le tracker est en place mais encore vide : aucune candidature n&apos;est partie. Les zéros ci-dessous sont
+          donc exacts, pas un symptôme. La suite se joue dans{" "}
           <Link href="/pipeline" className="text-brand hover:underline">
             Candidatures
           </Link>

@@ -67,6 +67,21 @@ test("chiffresCles: aucune donnée => null partout, jamais 0", () => {
   assert.equal(c.tauxReponse, null);
 });
 
+test("chiffresCles: tracker amorcé mais vide ≠ tracker absent", () => {
+  // Depuis l'amorçage du tracker (2026-08-06), c'est l'état courant : le fichier
+  // existe, il n'a aucune ligne. Il doit se distinguer du fichier absent, sinon
+  // la page ne peut pas expliquer quatre zéros à l'écran.
+  const amorce = {
+    metadata: { generatedAt: "2026-08-06", sources: { tracker: true } },
+    tracker: { total: 0, byStatus: {}, activeApps: 0 },
+    funnel: { everApplied: 0, everResponded: 0, responseRate: 0, smallSample: true },
+  };
+  const c = chiffresCles(amorce);
+  assert.equal(c.aDesDonnees, true, "le fichier existe");
+  assert.equal(c.total, 0, "mais il est vide");
+  assert.equal(chiffresCles(VIDE).total, null, "fichier absent => total null, pas 0");
+});
+
 test("chiffresCles: null en entrée ne plante pas", () => {
   const c = chiffresCles(null);
   assert.equal(c.aDesDonnees, false);
