@@ -82,6 +82,27 @@ test("une offre sans identifiant est écartée et comptée", () => {
   assert.equal(lot.sansId, 1);
 });
 
+test("le score mesure l ADEQUATION au profil, pas la presence de mots-cles", () => {
+  // Le defaut trouve le 2026-08-06 : trois postes UiPath notes 80+ alors que le CV
+  // n'en contient pas une ligne, parce que le profil n'etait pas transmis. Le
+  // prompt doit maintenant dire explicitement ce que mesure le score.
+  const p = promptRank({
+    offres: [normaliseOffre(offreFT("A"))],
+    filtres: { positive: ["RPA", "UiPath"] },
+    profil: "n8n, API REST, PostgreSQL. Aucun outil RPA.",
+  });
+  assert.ok(/PROFIL REEL/.test(p), "le profil doit etre annonce comme source de verite");
+  assert.ok(/ADEQUATION/.test(p));
+  assert.ok(/score BAS/.test(p), "une offre exigeant un outil absent du profil doit etre penalisee");
+  assert.ok(/ce qu'il CHERCHE, pas ce qu'il SAIT faire/.test(p), "les mots-cles ne sont pas des competences");
+});
+
+test("sans profil, le prompt le DIT au lieu de faire semblant", () => {
+  const p = promptRank({ offres: [normaliseOffre(offreFT("A"))], filtres: { positive: ["RPA"] } });
+  assert.ok(/non fourni/.test(p));
+  assert.ok(/dis-le dans whyMatch/.test(p), "l absence de profil doit etre visible dans le resultat");
+});
+
 test("le prompt porte les critères de portals.yml, pas les siens", () => {
   const p = promptRank({
     offres: [normaliseOffre(offreFT("A"))],

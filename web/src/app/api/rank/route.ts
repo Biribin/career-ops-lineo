@@ -1,6 +1,7 @@
 import { erreurOpenAi, executeLlm } from "@/lib/llm-runner";
 import { lireFiltresPortals } from "@/lib/core/portals";
 import { MAX_OFFRES, parseRank, prepareLot, promptRank } from "@/lib/rank.mjs";
+import { profilCv } from "@/lib/profil-cv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,10 +54,15 @@ export async function POST(req: Request) {
   const filtres = lireFiltresPortals();
   const maxRetenues = Number.isFinite(Number(body.max)) ? Math.max(1, Math.min(20, Number(body.max))) : 5;
 
+  // Le profil est lu COTE SERVEUR, pas recu de n8n. Sans lui, le score mesurait
+  // « cette offre contient mes mots-cles » et non « je corresponds a cette
+  // offre » : c'est ce qui a fait remonter trois postes UiPath a 80+ alors que le
+  // CV n'en contient pas une ligne.
+  const profil = profilCv();
   const prompt = promptRank({
     offres: lot.offres,
     filtres,
-    profil: String(body.profil ?? "").slice(0, 4000),
+    profil,
     maxRetenues,
   });
 
@@ -84,5 +90,6 @@ export async function POST(req: Request) {
     inventes: resultat.inventes,
     filtresSource: "portals.yml",
     motsCles: filtres.positive.length,
+    profilLu: profil.length > 0,
   });
 }

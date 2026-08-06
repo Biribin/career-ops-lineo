@@ -1,7 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
 import { erreurOpenAi, executeLlm } from "@/lib/llm-runner";
+import { profilCv } from "@/lib/profil-cv";
 import { parseLettre, promptLettre } from "@/lib/letter.mjs";
 
 export const runtime = "nodejs";
@@ -19,18 +17,6 @@ export const maxDuration = 300;
 // Lève plutôt que de rendre une lettre douteuse. Une lettre vide, trop longue ou
 // contenant une ancienneté inventée ne doit jamais atteindre l'étape d'envoi —
 // c'est la seule pièce que lit un recruteur.
-
-function profilCv(): string {
-  for (const rel of ["cv.md", path.join("data", "perso", "cv.md")]) {
-    try {
-      const t = fs.readFileSync(path.join(careerOpsRoot(), rel), "utf8");
-      if (t.trim()) return t;
-    } catch {
-      /* on essaie l'emplacement suivant */
-    }
-  }
-  return "";
-}
 
 export async function POST(req: Request) {
   let body: { offre?: Record<string, unknown>; consigne?: string; candidat?: Record<string, unknown> };
