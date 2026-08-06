@@ -220,26 +220,23 @@ Résultats obtenus :
 | Scan ATS (0 token) | ✅ déjà bon | ✅ 15 boards greenhouse, 7 injoignables, 0 nouvelle offre |
 | `POST /api/tailor` | ❌ `503 cv.md introuvable` | ✅ `200` + 7 mots-clés réels |
 | CLI agentique dans le conteneur | ❌ aucun (`/api/run` → 404) | ✅ `gemini` 0.53.1 + `claude` 2.1.222 |
-| Gemini headless répond (`-p`) | — | ✅ vérifié en local, ligne `VERDICT` propre |
-| Gemini lit la couche utilisateur | ❌ `ignored by configured ignore patterns` | ⏳ correctif écrit (`.gemini/settings.json`), **re-test à faire** |
-| Évaluation A–F de bout en bout | ❌ impossible | ⏳ **non vérifiée** — voir ci-dessous |
+| Gemini headless répond (`-p`) | ❌ pas de binaire | ✅ **dans le conteneur** : `PONG` |
+| `GEMINI_API_KEY` exploitable | ❌ liste séparée par des virgules | ✅ une seule clé (53 car., 0 virgule) |
+| Gemini lit la couche utilisateur | ❌ `ignored by configured ignore patterns` | ✅ **dans le conteneur** : `CV_LU: CV — Linéo Biribin` |
 
-**Ce qui reste à vérifier, honnêtement.** L'évaluation A–F complète n'a pas pu être
-exécutée jusqu'au bout : le pool de clés Gemini local a épuisé son quota gratuit en
-cours de test (`Quota exceeded ... generate_content_free_tier_requests, limit: 5`).
-Le correctif `.gemini/settings.json` est donc **écrit et raisonné, pas prouvé sur un
-run complet**. Deux contrôles ont écarté les fausses pistes : le CLI répond bien en
-headless (`VERDICT` propre) et le silence observé ensuite persiste **sans** le
-fichier de réglages — c'est le quota, pas la configuration. À rejouer quand le quota
-est revenu :
+Le dernier contrôle est celui qui compte : il prouve **sur le VPS**, tier gratuit,
+que le CLI lit un fichier gitignoré (`cv.md`) — donc que `.gemini/settings.json`
+fait son travail et qu'une évaluation ne scorera pas une offre à l'aveugle. Le run
+traverse quand même des `retryWithBackoff` (plafond des 5 req/min) : compter
+plusieurs minutes, et une évaluation à la fois.
+
+Reste non exécuté de bout en bout : une évaluation A–F **complète avec persistance**
+(`reserve-report-num` → `reports/` → `merge-tracker`). Elle écrirait une vraie ligne
+dans le tracker, ce qui n'a pas sa place dans un test. À faire sur une offre réelle :
 
 ```bash
-gemini --approval-mode plan -p "Lis cv.md et jds/offre-test-gemini.txt, puis reponds:
-CV_LU: <premier titre de cv.md>
-JD_LU: <intitule du poste>"
+docker exec -w /app $C node gemini-eval.mjs --file jds/<offre>.txt
 ```
-
-Si les deux lignes sortent remplies, le filtre est bien levé.
 
 Avec `CAREER_OPS_CLI=gemini`, `doctor.mjs` garde 1 warning **informatif** :
 « Playwright MCP check skipped for CLI: gemini » — `doctor` ne sait scanner les
