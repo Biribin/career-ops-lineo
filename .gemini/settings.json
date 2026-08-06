@@ -1,13 +1,4 @@
 {
-  "$comment": [
-    "Le Gemini CLI filtre ses lectures sur .gitignore PAR DEFAUT. Or toute la couche",
-    "utilisateur de career-ops est gitignoree (cv.md, config/profile.yml,",
-    "modes/_profile.md, jds/, reports/) : sans ce reglage, une evaluation headless",
-    "echoue sur 'File path ... is ignored by configured ignore patterns' et le modele",
-    "score une offre SANS avoir lu le CV. Verifie le 2026-08-05.",
-    "On desactive donc le filtre .gitignore et on active .geminiignore a la place,",
-    "qui protege explicitement les secrets (voir /.geminiignore)."
-  ],
   "context": {
     "fileFiltering": {
       "respectGitIgnore": false,

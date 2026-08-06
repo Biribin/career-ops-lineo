@@ -132,6 +132,26 @@ dire qu'un navigateur qui a déjà « Claude Code » en mémoire continuera de l
 pour `/api/assistant` et `/api/explore/ai`. Pour `/api/run` c'est sans conséquence :
 la chaîne de résilience de `buildChain` bascule sur Gemini toute seule.
 
+### ⚠️ Le Gemini CLI ne voit pas le CV sans `.gemini/settings.json`
+
+Piège silencieux, trouvé en lançant une vraie évaluation A–F le 2026-08-05. Le
+Gemini CLI **filtre ses lectures sur `.gitignore` par défaut**, et toute la couche
+utilisateur de career-ops y est précisément :
+
+```
+Error executing tool read_file: File path '.../cv.md' is ignored by
+configured ignore patterns.       (idem config/profile.yml, modes/_profile.md, jds/)
+```
+
+Le danger n'est pas l'erreur, c'est ce qui suit : **le modèle continue**, score
+l'offre sans avoir lu le CV, et émet quand même sa ligne `VERDICT`. Un score faux
+qui a l'air vrai. Corrigé par `.gemini/settings.json`
+(`context.fileFiltering.respectGitIgnore: false`) + un `.geminiignore` qui reprend
+la protection des secrets que `.gitignore` assurait par effet de bord.
+
+**Ça concerne aussi le défaut Claude Code** : `buildChain` bascule sur Gemini dès
+que le CLI primaire échoue, donc le repli produisait des scores non fondés.
+
 ### Modèles / quotas
 
 - CLI : `GEMINI_MODEL` (optionnel) surcharge le modèle du Gemini CLI.
@@ -140,6 +160,12 @@ la chaîne de résilience de `buildChain` bascule sur Gemini toute seule.
 - La clé **doit** venir d'un projet Google **sans facturation activée** : c'est ce
   qui garantit qu'un dépassement de quota renvoie une erreur 429 au lieu de basculer
   silencieusement en tier payant.
+- **Le free tier est étroit** : `limit: 5, model: gemini-3-flash` sur
+  `generate_content_free_tier_requests`, avec des reprises annoncées à ~37 s. Une
+  évaluation agentique enchaîne beaucoup d'appels : comptez plusieurs minutes par
+  offre et **une seule évaluation à la fois**. C'est utilisable pour du fond de
+  tâche, pas pour un batch. (Ce plafond est aussi la preuve qu'on est bien sur le
+  tier gratuit : l'erreur nomme la métrique `..._free_tier_requests`.)
 
 ## Couche utilisateur : comment elle arrive dans le conteneur
 
@@ -194,7 +220,23 @@ Résultats obtenus :
 | Scan ATS (0 token) | ✅ déjà bon | ✅ 15 boards greenhouse, 7 injoignables, 0 nouvelle offre |
 | `POST /api/tailor` | ❌ `503 cv.md introuvable` | ✅ `200` + 7 mots-clés réels |
 | CLI agentique dans le conteneur | ❌ aucun (`/api/run` → 404) | ✅ `gemini` 0.53.1 + `claude` 2.1.222 |
-| Évaluation LLM | ❌ impossible | ⏳ **en attente de `GEMINI_API_KEY` dans Coolify** |
+| Gemini headless répond (`-p`) | ❌ pas de binaire | ✅ **dans le conteneur** : `PONG` |
+| `GEMINI_API_KEY` exploitable | ❌ liste séparée par des virgules | ✅ une seule clé (53 car., 0 virgule) |
+| Gemini lit la couche utilisateur | ❌ `ignored by configured ignore patterns` | ✅ **dans le conteneur** : `CV_LU: CV — Linéo Biribin` |
+
+Le dernier contrôle est celui qui compte : il prouve **sur le VPS**, tier gratuit,
+que le CLI lit un fichier gitignoré (`cv.md`) — donc que `.gemini/settings.json`
+fait son travail et qu'une évaluation ne scorera pas une offre à l'aveugle. Le run
+traverse quand même des `retryWithBackoff` (plafond des 5 req/min) : compter
+plusieurs minutes, et une évaluation à la fois.
+
+Reste non exécuté de bout en bout : une évaluation A–F **complète avec persistance**
+(`reserve-report-num` → `reports/` → `merge-tracker`). Elle écrirait une vraie ligne
+dans le tracker, ce qui n'a pas sa place dans un test. À faire sur une offre réelle :
+
+```bash
+docker exec -w /app $C node gemini-eval.mjs --file jds/<offre>.txt
+```
 
 Avec `CAREER_OPS_CLI=gemini`, `doctor.mjs` garde 1 warning **informatif** :
 « Playwright MCP check skipped for CLI: gemini » — `doctor` ne sait scanner les
