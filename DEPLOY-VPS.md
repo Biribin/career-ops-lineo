@@ -100,10 +100,28 @@ l.149](gemini-eval.mjs#L149) lit `process.env.GEMINI_API_KEY` et le passe **verb
 à `new GoogleGenerativeAI()` ([l.301](gemini-eval.mjs#L301)), et le Gemini CLI attend
 lui aussi une valeur unique. Une liste séparée par des virgules part donc en entier
 comme si c'était une seule clé : tout échoue en `INVALID_ARGUMENT` / 401, **pas** en
-429. Le symptôme ne ressemble pas à un problème de quota. La rotation que Lineo
-connaît (`gemini-rotate`, pool dans `~/.gemini/`, voir `modes/_custom.md`) est
-**strictement locale** : ni le script, ni le pool, ni `~/.gemini/` ne sont dans
-l'image. Pour remettre Gemini en défaut, il faut **une seule** clé dans la variable.
+429. Le symptôme ne ressemble pas à un problème de quota. Pour remettre Gemini en
+défaut, il faut donc **une seule** clé dans la variable.
+
+### Utiliser le pool de clés sur le VPS (aucun code à écrire)
+
+`GEMINI_API_KEY` ne saura jamais lire une liste, mais **l'app est déjà câblée pour la
+rotation** : [clis.ts l.215-224](web/src/lib/clis.ts#L215) cherche un binaire
+`gemini-rotate` sur le `PATH` et le **préfère** au `gemini` nu (label « Gemini · clés
+API (rotation) »). C'est exactement le mécanisme local de Lineo (`~/.gemini/rotate.mjs`,
+pool de 10 clés, voir `modes/_custom.md`).
+
+Activer le pool sur le VPS est donc du **provisionnement**, pas du développement :
+
+1. poser `rotate.mjs` + le fichier de pool sur le volume, par exemple
+   `/app/data/perso/gemini/` (le volume survit aux redéploiements) ;
+2. rendre `gemini-rotate` exécutable et visible sur le `PATH` du conteneur (un lien
+   dans `/usr/local/bin`, à ajouter dans `docker-entrypoint-web.sh` à côté des autres) ;
+3. remettre `CAREER_OPS_CLI=gemini` si on veut Gemini par défaut.
+
+⚠️ Portée limitée à la voie CLI (`/api/run`, `/api/assistant`, `/api/explore/ai`).
+Les scripts qui appellent l'API directement, `gemini-eval.mjs` en tête, lisent
+`GEMINI_API_KEY` sans aucune rotation : pour eux, ce sera toujours une clé unique.
 
 > ⚠️ **Ordre impératif : supprimer `ANTHROPIC_API_KEY` des variables Coolify AVANT
 > de redéployer avec ce défaut.** Cette clé est facturée au token ; la laisser en
