@@ -8,16 +8,15 @@ export const maxDuration = 120;
 
 // Jugement LLM sans état pour le forum watcher n8n (workflow iHpOWEC1nFUDsZ7T).
 //
-// SHIM COMPATIBLE ANTHROPIC (volontaire) : le nœud n8n envoie déjà un corps au
-// format Messages API (`{model, max_tokens, system, messages:[{role,content}]}`)
-// et le nœud « Lire le verdict » parse une réponse au format `{content:[{type,
-// text}]}`. En imitant ces deux formats, le seul changement à faire dans le
-// workflow est l'URL + l'auth du nœud HTTP — « Preparer appel Claude » et
-// « Lire le verdict » restent INCHANGÉS. (On accepte aussi un simple `{prompt}`.)
+// SHIM COMPATIBLE ANTHROPIC (volontaire) : le nœud n8n envoie un corps au format
+// Messages API (`{system, messages}`) et « Lire le verdict » parse `{content:
+// [{type,text}]}`. En imitant ces formats, seul l'URL + l'auth du nœud change.
+// (On accepte aussi un simple `{prompt}`.)
 //
-// On exécute le CLI configuré (Claude Code sur l'abonnement Max = coût marginal
-// nul, au lieu de l'API Anthropic facturée) en headless -p, SANS aucun outil
-// (pur jugement texte). Derrière le basic_auth Caddy : n8n s'authentifie en Basic.
+// FAILOVER 2 COMPTES MAX : on lance Claude Code avec CLAUDE_CODE_OAUTH_TOKEN
+// (compte 1). Si la réponse est un message de limite d'abonnement, on RELANCE
+// avec CLAUDE_CODE_OAUTH_TOKEN_2 (compte 2). Si les deux sont limités → 429 pour
+// que n8n retente plus tard SANS marquer le sujet vu (offre pas perdue).
 
 type AnthropicMsg = { role?: string; content?: unknown };
 
@@ -31,53 +30,22 @@ function contentToText(content: unknown): string {
   return "";
 }
 
-export async function POST(req: Request) {
-  let body: { prompt?: string; cliId?: string; system?: string; messages?: AnthropicMsg[] };
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
-  }
+// Messages « quota atteint » des CLI (Claude Code surtout). Court + spécifique
+// pour ne pas confondre avec un vrai verdict JSON.
+const LIMIT_RE = /hit your (session|usage) limit|approaching your (session|usage) limit|usage limit reached|rate.?limit(ed)?|resets? (at )?\d{1,2}(:\d{2})?\s*(am|pm)/i;
+function isLimited(text: string): boolean {
+  return !!text && text.length < 400 && LIMIT_RE.test(text);
+}
 
-  // Prompt explicite prioritaire ; sinon on reconstruit depuis system + messages.
-  let prompt = (body.prompt || "").trim();
-  if (!prompt) {
-    const sys = (body.system || "").trim();
-    const userText = (Array.isArray(body.messages) ? body.messages : [])
-      .map((m) => contentToText(m?.content))
-      .join("\n")
-      .trim();
-    prompt = [sys, userText].filter(Boolean).join("\n\n");
-  }
-  if (!prompt) return Response.json({ error: "prompt (ou system+messages) requis" }, { status: 400 });
+type CliResult = { text: string; err: string; code: number | null };
 
-  // Défaut = claude (abonnement Max) : ce watcher DOIT tourner sur le Max, pas
-  // sur le Gemini par défaut du conteneur. Surchargeable via body.cliId.
-  const cliId = (body.cliId || "claude").trim();
-  const resolved = resolveCli(cliId);
-  if (!resolved) return Response.json({ error: `CLI '${cliId}' introuvable sur cette machine` }, { status: 404 });
-  const { spec, binPath } = resolved;
-
-  const isClaude = cliId === "claude";
-  // -p = print (réponse finale sur stdout, non interactif). Tous les outils
-  // désactivés : le prompt contient déjà tout, le modèle n'a qu'à répondre.
-  const args = isClaude
-    ? [
-        "-p",
-        prompt,
-        "--permission-mode",
-        "acceptEdits",
-        "--disallowedTools",
-        "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Read,Glob,Grep",
-      ]
-    : spec.args(prompt);
-
-  return new Promise<Response>((resolve) => {
+function runCli(binPath: string, args: string[], env: NodeJS.ProcessEnv): Promise<CliResult> {
+  return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+      child = spawn(binPath, args, { cwd: careerOpsRoot(), env });
     } catch (e) {
-      resolve(Response.json({ error: e instanceof Error ? e.message : "spawn a échoué" }, { status: 500 }));
+      resolve({ text: "", err: e instanceof Error ? e.message : "spawn a échoué", code: -1 });
       return;
     }
     let out = "";
@@ -97,27 +65,67 @@ export async function POST(req: Request) {
     });
     child.on("error", (e) => {
       clearTimeout(killer);
-      resolve(Response.json({ error: e.message }, { status: 500 }));
+      resolve({ text: "", err: e.message, code: -1 });
     });
     child.on("close", (code) => {
       clearTimeout(killer);
-      const text = out.trim();
-      // Le CLI a atteint la limite de l'abonnement (Max) → ce n'est PAS un
-      // verdict. On renvoie 429 pour que l'appelant (nœud n8n retryOnFail) traite
-      // ça comme une erreur : le sujet n'est alors PAS marqué « vu » et sera
-      // réévalué au prochain passage, une fois le quota réinitialisé. Sans ça,
-      // l'offre serait scorée 0 puis perdue silencieusement pendant la fenêtre.
-      const LIMIT_RE = /hit your (session|usage) limit|approaching your (session|usage) limit|usage limit reached|rate.?limit(ed)?|resets? (at )?\d{1,2}(:\d{2})?\s*(am|pm)/i;
-      if (text && text.length < 400 && LIMIT_RE.test(text)) {
-        resolve(Response.json({ error: `CLI rate-limited: ${text}` }, { status: 429 }));
-        return;
-      }
-      if (text) {
-        // Format de réponse Anthropic Messages → « Lire le verdict » le parse tel quel.
-        resolve(Response.json({ content: [{ type: "text", text }] }));
-      } else {
-        resolve(Response.json({ error: err.trim() || `${spec.name} n'a rien renvoyé (code ${code})` }, { status: 502 }));
-      }
+      resolve({ text: out.trim(), err: err.trim(), code });
     });
   });
+}
+
+export async function POST(req: Request) {
+  let body: { prompt?: string; cliId?: string; system?: string; messages?: AnthropicMsg[] };
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "bad json" }, { status: 400 });
+  }
+
+  let prompt = (body.prompt || "").trim();
+  if (!prompt) {
+    const sys = (body.system || "").trim();
+    const userText = (Array.isArray(body.messages) ? body.messages : [])
+      .map((m) => contentToText(m?.content))
+      .join("\n")
+      .trim();
+    prompt = [sys, userText].filter(Boolean).join("\n\n");
+  }
+  if (!prompt) return Response.json({ error: "prompt (ou system+messages) requis" }, { status: 400 });
+
+  // Défaut = claude (Max) ; ce watcher DOIT tourner sur le Max, pas sur le gemini
+  // par défaut du conteneur. Surchargeable via body.cliId.
+  const cliId = (body.cliId || "claude").trim();
+  const resolved = resolveCli(cliId);
+  if (!resolved) return Response.json({ error: `CLI '${cliId}' introuvable sur cette machine` }, { status: 404 });
+  const { spec, binPath } = resolved;
+
+  const isClaude = cliId === "claude";
+  const args = isClaude
+    ? ["-p", prompt, "--permission-mode", "acceptEdits", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Read,Glob,Grep"]
+    : spec.args(prompt);
+
+  // Essai 1 : compte par défaut (CLAUDE_CODE_OAUTH_TOKEN).
+  let r = await runCli(binPath, args, process.env);
+  let tokenUtilise = "1";
+
+  // Essai 2 : bascule sur le compte 2 si le 1er est rate-limited (claude only).
+  const token2 = process.env.CLAUDE_CODE_OAUTH_TOKEN_2;
+  if (isClaude && token2 && isLimited(r.text)) {
+    tokenUtilise = "2";
+    r = await runCli(binPath, args, { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: token2 });
+  }
+
+  // Les deux comptes limités (ou le seul dispo) → 429 : n8n retente plus tard,
+  // le sujet n'est PAS marqué vu, l'offre n'est pas perdue.
+  if (isLimited(r.text)) {
+    return Response.json({ error: `CLI rate-limited (token(s) épuisé(s)): ${r.text}` }, { status: 429 });
+  }
+  if (r.text) {
+    return new Response(JSON.stringify({ content: [{ type: "text", text: r.text }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "X-Career-Ops-Token": tokenUtilise },
+    });
+  }
+  return Response.json({ error: r.err || `${spec.name} n'a rien renvoyé (code ${r.code})` }, { status: 502 });
 }
