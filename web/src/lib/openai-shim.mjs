@@ -86,6 +86,55 @@ export function reponseChatCompletions({ texte, model = "career-ops-cli", id = "
 }
 
 /**
+ * Aplati une requête Responses API en un prompt.
+ *
+ * `input` peut être une chaîne, ou une liste d'items façon messages
+ * (`{role, content}` où content est une liste de parts `input_text`).
+ * `instructions` joue le rôle du message système.
+ */
+export function promptDepuisResponses(body) {
+  const b = body ?? {};
+  const instructions = String(b.instructions ?? "").trim();
+
+  let corps = "";
+  if (typeof b.input === "string") {
+    corps = b.input.trim();
+  } else if (Array.isArray(b.input)) {
+    corps = promptDepuisMessages(b.input);
+  }
+
+  return [instructions, corps].filter(Boolean).join("\n\n").trim();
+}
+
+/**
+ * Enveloppe une réponse texte au format Responses API.
+ *
+ * `output_text` est le raccourci que lisent la plupart des clients ; on renvoie
+ * AUSSI la structure `output[].content[]` complète, parce que le client OpenAI
+ * de LangChain lit celle-là et ignore le raccourci.
+ */
+export function reponseResponses({ texte, model = "career-ops-cli", id = "resp-career-ops", cree = 0 }) {
+  return {
+    id,
+    object: "response",
+    created_at: cree,
+    status: "completed",
+    model,
+    output: [
+      {
+        id: `${id}-msg`,
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: texte, annotations: [] }],
+      },
+    ],
+    output_text: texte,
+    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+  };
+}
+
+/**
  * Nettoie ce que rend un CLI conversationnel avant de le donner à un parser
  * de sortie structurée.
  *

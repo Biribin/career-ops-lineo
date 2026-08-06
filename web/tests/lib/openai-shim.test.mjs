@@ -95,3 +95,36 @@ test("nettoieSortie tolère null et vide", () => {
   assert.equal(nettoieSortie(undefined), "");
   assert.equal(nettoieSortie("   "), "");
 });
+
+// ── Responses API (le format que n8n vise quand responsesApiEnabled est vrai) ──
+
+test("Responses : instructions + input chaîne", async () => {
+  const { promptDepuisResponses } = await import("../../src/lib/openai-shim.mjs");
+  assert.equal(promptDepuisResponses({ instructions: "S", input: "U" }), "S\n\nU");
+  assert.equal(promptDepuisResponses({ input: "U" }), "U");
+  assert.equal(promptDepuisResponses({}), "");
+});
+
+test("Responses : input en liste d'items façon messages", async () => {
+  const { promptDepuisResponses } = await import("../../src/lib/openai-shim.mjs");
+  const p = promptDepuisResponses({
+    instructions: "S",
+    input: [{ role: "user", content: [{ type: "input_text", text: "U1" }] }],
+  });
+  assert.equal(p, "S\n\nU1");
+});
+
+test("Responses : l'enveloppe porte output[].content[] ET output_text", async () => {
+  const { reponseResponses } = await import("../../src/lib/openai-shim.mjs");
+  const r = reponseResponses({ texte: "salut", model: "career-ops-cli/claude", cree: 42 });
+  assert.equal(r.object, "response");
+  assert.equal(r.status, "completed");
+  // le raccourci, lu par certains clients…
+  assert.equal(r.output_text, "salut");
+  // …et la structure complète, lue par le client OpenAI de LangChain
+  assert.equal(r.output[0].role, "assistant");
+  assert.equal(r.output[0].content[0].type, "output_text");
+  assert.equal(r.output[0].content[0].text, "salut");
+  assert.equal(r.model, "career-ops-cli/claude");
+  assert.deepEqual(r.usage, { input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+});
