@@ -7,27 +7,51 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 // Jugement LLM sans état pour le forum watcher n8n (workflow iHpOWEC1nFUDsZ7T).
-// n8n envoie un prompt déjà formé (profil + consigne + offre) ; on le passe au
-// CLI configuré (Claude Code sur l'abonnement Max = coût marginal nul, au lieu
-// de l'API Anthropic facturée) en headless, SANS aucun outil (pur jugement
-// texte : aucune raison de lire des fichiers ou d'aller sur le web), et on
-// renvoie le texte brut du modèle. NON streamé : n8n veut une réponse simple.
 //
-// Sécurité : l'app entière est derrière le basic_auth Caddy — n8n doit donc
-// s'authentifier (credential Basic Auth côté n8n). Pas d'exposition publique de
-// cette route (elle lance un process sur le quota Max).
+// SHIM COMPATIBLE ANTHROPIC (volontaire) : le nœud n8n envoie déjà un corps au
+// format Messages API (`{model, max_tokens, system, messages:[{role,content}]}`)
+// et le nœud « Lire le verdict » parse une réponse au format `{content:[{type,
+// text}]}`. En imitant ces deux formats, le seul changement à faire dans le
+// workflow est l'URL + l'auth du nœud HTTP — « Preparer appel Claude » et
+// « Lire le verdict » restent INCHANGÉS. (On accepte aussi un simple `{prompt}`.)
+//
+// On exécute le CLI configuré (Claude Code sur l'abonnement Max = coût marginal
+// nul, au lieu de l'API Anthropic facturée) en headless -p, SANS aucun outil
+// (pur jugement texte). Derrière le basic_auth Caddy : n8n s'authentifie en Basic.
+
+type AnthropicMsg = { role?: string; content?: unknown };
+
+function contentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((c) => (c && typeof c === "object" && typeof (c as { text?: unknown }).text === "string" ? (c as { text: string }).text : ""))
+      .join("\n");
+  }
+  return "";
+}
+
 export async function POST(req: Request) {
-  let body: { prompt?: string; cliId?: string };
+  let body: { prompt?: string; cliId?: string; system?: string; messages?: AnthropicMsg[] };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
 
-  const prompt = (body.prompt || "").trim();
-  const cliId = (body.cliId || process.env.CAREER_OPS_CLI || "claude").trim();
-  if (!prompt) return Response.json({ error: "prompt requis" }, { status: 400 });
+  // Prompt explicite prioritaire ; sinon on reconstruit depuis system + messages.
+  let prompt = (body.prompt || "").trim();
+  if (!prompt) {
+    const sys = (body.system || "").trim();
+    const userText = (Array.isArray(body.messages) ? body.messages : [])
+      .map((m) => contentToText(m?.content))
+      .join("\n")
+      .trim();
+    prompt = [sys, userText].filter(Boolean).join("\n\n");
+  }
+  if (!prompt) return Response.json({ error: "prompt (ou system+messages) requis" }, { status: 400 });
 
+  const cliId = (body.cliId || process.env.CAREER_OPS_CLI || "claude").trim();
   const resolved = resolveCli(cliId);
   if (!resolved) return Response.json({ error: `CLI '${cliId}' introuvable sur cette machine` }, { status: 404 });
   const { spec, binPath } = resolved;
@@ -77,7 +101,8 @@ export async function POST(req: Request) {
       clearTimeout(killer);
       const text = out.trim();
       if (text) {
-        resolve(Response.json({ text }));
+        // Format de réponse Anthropic Messages → « Lire le verdict » le parse tel quel.
+        resolve(Response.json({ content: [{ type: "text", text }] }));
       } else {
         resolve(Response.json({ error: err.trim() || `${spec.name} n'a rien renvoyé (code ${code})` }, { status: 502 }));
       }
