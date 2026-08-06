@@ -201,6 +201,21 @@ export function buildChain(primaryCliId: string, kind: string): Runner[] {
     });
   }
 
+  // Failover 2e compte Max : si le compte primaire (CLAUDE_CODE_OAUTH_TOKEN) est
+  // rate-limited ou échoue, retente Claude Code avec CLAUDE_CODE_OAUTH_TOKEN_2
+  // AVANT de tomber sur Gemini. Toute la chaîne (éval, apply, etc.) en profite.
+  const claudeToken2 = process.env.CLAUDE_CODE_OAUTH_TOKEN_2;
+  if (primary && primaryCliId === "claude" && claudeToken2) {
+    add({
+      id: "claude-token2",
+      cliId: "claude",
+      label: "Claude Code · compte 2",
+      binPath: primary.binPath,
+      args: primary.spec.args,
+      env: { CLAUDE_CODE_OAUTH_TOKEN: claudeToken2 },
+    });
+  }
+
   // Google-account free tier: Gemini's individual "Sign in with Google" (Code
   // Assist) path was RETIRED by Google — the CLI now answers "This client is no
   // longer supported for Gemini Code Assist for individuals… migrate to
