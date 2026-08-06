@@ -76,6 +76,12 @@ function loadYaml(rel: string): Record<string, unknown> | null {
  * portals.yml (title_filter / location_filter) and falls back to
  * config/profile.yml (target_roles, location) for the positive keywords when
  * portals has none. Never throws — a bare checkout just yields DEFAULT_FILTERS.
+ *
+ * portals.yml s'AJOUTE au socle de DEFAULT_FILTERS, il ne le remplace pas. Les
+ * deux décrivent la même intention de recherche mais ne voyagent pas ensemble :
+ * portals.yml est gitignoré et provisionné sur le volume du VPS, le socle est
+ * embarqué dans le code et suit chaque déploiement. Remplacer ferait disparaître
+ * le socle dès que portals.yml existe — c'est-à-dire précisément en production.
  */
 export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: string[] } {
   const filters: ExploreFilters = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats] };
@@ -85,11 +91,14 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
   if (portals) {
     const tf = (portals.title_filter ?? {}) as Record<string, unknown>;
     const lf = (portals.location_filter ?? {}) as Record<string, unknown>;
-    filters.positive = listFrom(tf.positive);
-    filters.negative = listFrom(tf.negative);
-    filters.allow = listFrom(lf.allow);
-    filters.block = listFrom(lf.block);
-    filters.alwaysAllow = listFrom(lf.always_allow);
+    // Union socle + portals.yml, dans cet ordre : cleanChips dédoublonne sans
+    // tenir compte de la casse, donc « n8n » et « N8N » ne font qu'un chip.
+    const union = (base: string[], extra: unknown) => listFrom([...base, ...listFrom(extra)]);
+    filters.positive = union(DEFAULT_FILTERS.positive, tf.positive);
+    filters.negative = union(DEFAULT_FILTERS.negative, tf.negative);
+    filters.allow = union(DEFAULT_FILTERS.allow, lf.allow);
+    filters.block = union(DEFAULT_FILTERS.block, lf.block);
+    filters.alwaysAllow = union(DEFAULT_FILTERS.alwaysAllow, lf.always_allow);
     if (filters.positive.length || filters.allow.length || filters.block.length) seededFrom.push("portals.yml");
   }
 

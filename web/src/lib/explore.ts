@@ -27,15 +27,76 @@ export type ExploreFilters = {
   limitPerAts: number;
 };
 
+/**
+ * Préremplissage de la première recherche — le profil de recherche permanent.
+ *
+ * Ces listes sont un SOCLE, pas un remplacement : `seedExploreFilters()` en fait
+ * l'union avec `portals.yml`, si bien que les deux sources contribuent. On les
+ * met ici (et pas seulement dans portals.yml) parce que portals.yml est
+ * gitignoré et vit sur le volume du VPS : seul le code embarqué est déployé par
+ * un push. Un mot-clé retiré de portals.yml reste donc affiché s'il figure ici —
+ * c'est le prix à payer pour un préremplissage qui suit le déploiement.
+ *
+ * Rappel de sémantique (scan.mjs::compileKeyword) : un mot-clé de 2-3 lettres
+ * est comparé avec des frontières de mot (`\bai\b`), tout le reste en simple
+ * sous-chaîne. D'où les variantes accentuées ET non accentuées, et d'où le fait
+ * que « n8n » couvre déjà « n8n developer » — les variantes longues restent
+ * listées pour que l'intention se lise dans l'interface.
+ */
 export const DEFAULT_FILTERS: ExploreFilters = {
-  positive: [],
-  negative: [],
-  allow: [],
+  positive: [
+    "n8n",
+    "n8n developer",
+    "n8n engineer",
+    "n8n automation",
+    "automation engineer",
+    "automation developer",
+    "workflow automation",
+    "business automation",
+    "process automation",
+    "AI engineer",
+    "AI automation engineer",
+    "AI workflow engineer",
+    "generative AI",
+    "LLM engineer",
+    "AI agent",
+    "AI agents",
+    "integration engineer",
+    "API integration",
+    "solutions engineer",
+    "solutions architect",
+    "technical consultant",
+    "Power Automate",
+    "low-code",
+    "no-code",
+    "RPA",
+    "UiPath",
+    "LangChain",
+    "LangGraph",
+    "CrewAI",
+    "AutoGen",
+    "ingénieur automatisation",
+    "ingenieur automatisation",
+    "ingénieur IA",
+    "ingenieur IA",
+    "développeur IA",
+    "developpeur IA",
+    "intelligence artificielle",
+    "automatisation",
+    "workflow",
+  ],
+  // Sous-chaîne : « senior » écarte « Senior AI Engineer », « sale » écarte
+  // « Sales Engineer » (et, effet de bord assumé, « Salesforce … »).
+  negative: ["commercial", "sale", "senior"],
+  // Belgique et Suisse s'ajoutent au périmètre France + remote + Europe de
+  // portals.yml. Les variantes anglaises sont indispensables : un ATS écrit
+  // « Brussels, Belgium », jamais « Belgique ».
+  allow: ["Belgique", "Belgium", "Suisse", "Switzerland"],
   block: [],
   alwaysAllow: [],
-  sinceDays: 7,
+  sinceDays: 30,
   ats: [...ATS_SOURCES],
-  limitPerAts: 150,
+  limitPerAts: 500,
 };
 
 export type DiscoveredOffer = {

@@ -83,10 +83,15 @@ test("multi-word entries preserved: 'Costa Rica, South Africa, United States' �
   assert.deepEqual(cleanChips(parts), ["Costa Rica", "South Africa", "United States"]);
 });
 
-test("cap at 16: 20 comma-separated countries → 16 chips", () => {
-  const countries = Array.from({ length: 20 }, (_, i) => `Country${i + 1}`);
+test("aucun plafond : 60 pays séparés par des virgules → 60 chips", () => {
+  const countries = Array.from({ length: 60 }, (_, i) => `Country${i + 1}`);
   const parts = split(countries.join(","));
-  assert.equal(cleanChips(parts).length, 16);
+  assert.equal(cleanChips(parts).length, 60);
+});
+
+test("aucun plafond : le dernier mot-clé d'une longue liste survit", () => {
+  const parts = split([...Array.from({ length: 40 }, (_, i) => `kw${i}`), "Integration Engineer"].join(","));
+  assert.ok(cleanChips(parts).includes("Integration Engineer"));
 });
 
 test("'12345' → 1 chip (has digits)", () => {

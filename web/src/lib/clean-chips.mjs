@@ -3,9 +3,14 @@
 // clean-chips.test.mjs (which can't import .ts without a runner).
 // This is the single source of truth for the chip-cleaning logic.
 
-const CHIP_CAP = 16;
+// Pas de plafond. Il y en avait un (16) parce que la rangée de chips servait à
+// une poignée de mots-clés tapés à la main ; en pratique un profil de recherche
+// réel en compte 40+ (n8n, IA, intégration, variantes FR/EN), et la troncature
+// supprimait silencieusement les plus spécifiques — donc les plus discriminants.
+// Voir lireFiltresPortals() dans lib/core/portals.ts, qui existait uniquement
+// pour contourner ce plafond côté classement.
 
-/** Trim, drop empties, de-dupe case-insensitively, cap length. */
+/** Trim, drop empties, de-dupe case-insensitively. */
 export function cleanChips(v) {
   if (v == null) return [];
   const arr = Array.isArray(v) ? v : [v];
@@ -20,7 +25,6 @@ export function cleanChips(v) {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(k);
-    if (out.length >= CHIP_CAP) break;
   }
   return out;
 }
