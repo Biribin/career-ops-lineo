@@ -54,6 +54,18 @@ export function resoudreLien(ligne, candidats) {
     else ecarteesPourAmbiguite = urlsBoite.length;
   }
 
+  // 3) À défaut, le POSTE seul — et c'est ce qui sauve le cas réel : le tracker
+  //    dit « Advocate Health » là où l'inbox dit « aah ». Aucune normalisation ne
+  //    rapproche une abréviation d'un nom complet, alors que l'intitulé du poste
+  //    est identique des deux côtés. Même exigence : une seule URL, sinon on
+  //    refuse de deviner.
+  if (trouves.length === 0 && poste) {
+    const memePoste = liste.filter((c) => c?.url && norm(c.role) === poste);
+    const urlsPoste = [...new Set(memePoste.map((c) => String(c.url)))];
+    if (urlsPoste.length === 1) trouves = memePoste;
+    else if (urlsPoste.length > 1) ecarteesPourAmbiguite = urlsPoste.length;
+  }
+
   // Dédoublonnage : la même URL vue par deux scans n'est pas une ambiguïté.
   const urls = [...new Set(trouves.map((c) => String(c.url)))];
 
