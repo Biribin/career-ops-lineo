@@ -41,10 +41,10 @@ export function OffresDecouvertes() {
     charger();
   }, [charger]);
 
+  // MEMES classes de conteneur que PipelineView (mx-auto max-w-6xl px-6) : sans
+  // elles, ce bloc s'etalait plein ecran alors que « Candidatures » est centre,
+  // ce qui donnait deux largeurs differentes sur la meme page.
   return (
-    {/* MEMES classes de conteneur que PipelineView (mx-auto max-w-6xl px-6) :
-        sans elles, ce bloc s'etalait plein ecran alors que « Candidatures » est
-        centre, ce qui donnait deux largeurs differentes sur la meme page. */}
     <section className="mx-auto max-w-6xl px-6 pb-8 max-sm:pb-24">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
