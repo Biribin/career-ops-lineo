@@ -45,9 +45,11 @@ export function OffresDecouvertes() {
     <section className="mb-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-medium text-foreground">Offres trouvées</h2>
+          <h2 className="text-lg font-medium text-foreground">Recherche n8n</h2>
           <p className="text-sm text-muted">
-            Cherchées sur France&nbsp;Travail avec les mots-clés de <code>portals.yml</code>, puis triées.
+            Offres rapportées par le workflow n8n, cherchées sur France&nbsp;Travail avec les mots-clés de{" "}
+            <code>portals.yml</code> puis triées. File distincte du «&nbsp;À trier&nbsp;» ci-dessus, qui vient du
+            scanner local.
           </p>
         </div>
         <button

@@ -9,11 +9,14 @@ export default function PipelinePage() {
   const { inbox, applications } = pipelineSummary();
   return (
     <Suspense>
-      {/* Lancement de la recherche + offres rapportées par le workflow n8n
-          « 1. Decouverte des offres ». Placé au-dessus du pipeline : on cherche
-          d'abord, on traite ensuite. */}
-      <OffresDecouvertes />
       <PipelineView applications={applications} inbox={inbox} />
+      {/* APRÈS le pipeline, et pas avant : la page a déjà sa file « À trier »
+          (alimentée par scan.mjs via data/pipeline.md). Mettre ce bloc en haut
+          donnait l'impression d'une seconde file de triage concurrente.
+          Il reste séparé parce que data/pipeline.md a un écrivain sanctionné et
+          que le contrat de données interdit d'y écrire directement ; la fusion
+          des deux files demande de passer par ce writer. */}
+      <OffresDecouvertes />
     </Suspense>
   );
 }
