@@ -102,6 +102,16 @@ export async function POST(req: Request) {
     child.on("close", (code) => {
       clearTimeout(killer);
       const text = out.trim();
+      // Le CLI a atteint la limite de l'abonnement (Max) → ce n'est PAS un
+      // verdict. On renvoie 429 pour que l'appelant (nœud n8n retryOnFail) traite
+      // ça comme une erreur : le sujet n'est alors PAS marqué « vu » et sera
+      // réévalué au prochain passage, une fois le quota réinitialisé. Sans ça,
+      // l'offre serait scorée 0 puis perdue silencieusement pendant la fenêtre.
+      const LIMIT_RE = /hit your (session|usage) limit|approaching your (session|usage) limit|usage limit reached|rate.?limit(ed)?|resets? (at )?\d{1,2}(:\d{2})?\s*(am|pm)/i;
+      if (text && text.length < 400 && LIMIT_RE.test(text)) {
+        resolve(Response.json({ error: `CLI rate-limited: ${text}` }, { status: 429 }));
+        return;
+      }
       if (text) {
         // Format de réponse Anthropic Messages → « Lire le verdict » le parse tel quel.
         resolve(Response.json({ content: [{ type: "text", text }] }));
