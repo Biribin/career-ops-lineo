@@ -51,7 +51,9 @@ export async function POST(req: Request) {
   }
   if (!prompt) return Response.json({ error: "prompt (ou system+messages) requis" }, { status: 400 });
 
-  const cliId = (body.cliId || process.env.CAREER_OPS_CLI || "claude").trim();
+  // Défaut = claude (abonnement Max) : ce watcher DOIT tourner sur le Max, pas
+  // sur le Gemini par défaut du conteneur. Surchargeable via body.cliId.
+  const cliId = (body.cliId || "claude").trim();
   const resolved = resolveCli(cliId);
   if (!resolved) return Response.json({ error: `CLI '${cliId}' introuvable sur cette machine` }, { status: 404 });
   const { spec, binPath } = resolved;
