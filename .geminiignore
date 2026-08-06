@@ -1,9 +1,19 @@
 # Remplace .gitignore comme filtre de lecture du Gemini CLI
 # (.gemini/settings.json : context.fileFiltering.respectGitIgnore = false).
 #
-# Le but du basculement est de laisser le CLI lire la couche utilisateur gitignoree
-# (cv.md, config/profile.yml, modes/_profile.md, jds/, reports/) — SANS pour autant
-# lui ouvrir les secrets. Tout ce qui est un secret ou du bruit reste ici.
+# POURQUOI ce basculement. Le Gemini CLI filtre ses lectures sur .gitignore PAR
+# DEFAUT, or TOUTE la couche utilisateur de career-ops y est (cv.md l.2,
+# config/profile.yml l.57, modes/_profile.md l.61, jds/*, reports/*.md). Une
+# evaluation headless echouait donc sur :
+#     Error executing tool read_file: File path '.../cv.md' is ignored by
+#     configured ignore patterns.
+# et — c'est le vrai danger — le modele poursuivait quand meme : il scorait
+# l'offre SANS avoir lu le CV et emettait sa ligne VERDICT comme si de rien
+# n'etait. Constate le 2026-08-05 sur une evaluation A-F reelle.
+#
+# Le but est donc de laisser le CLI lire la couche utilisateur gitignoree — SANS
+# pour autant lui ouvrir les secrets, que .gitignore protegeait jusqu'ici par
+# effet de bord. Tout ce qui est secret ou bruit reste liste ici.
 
 # Secrets — jamais lisibles par le modele
 .env
