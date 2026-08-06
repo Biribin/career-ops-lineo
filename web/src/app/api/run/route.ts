@@ -5,6 +5,7 @@ import { buildChain, spawnTarget, type Runner } from "@/lib/clis";
 import { careerOpsRoot, readMemory, findReportFile } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf } from "@/lib/pdf-render.mjs";
+import { cheminsCvYaml, contexteCvYaml, promptCvYaml, verifieCvAdapte } from "@/lib/cv-adapt.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
 export const runtime = "nodejs";
@@ -23,10 +24,24 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
 // free tiers (Google login, then API keys with auto-rotation) — the user sees a
 // soft "bascule…" status and the next CLI takes over on the SAME stream. Only the
 // last attempt's failure surfaces as a terminal error.
-type BuildPromptArgs = { kind: string; input: string; memory: string; today: string; pdfPaths?: PdfPaths };
+type CvYamlPaths = { dir: string; original: string; contexte: string; sortie: string };
+type BuildPromptArgs = {
+  kind: string;
+  input: string;
+  memory: string;
+  today: string;
+  pdfPaths?: PdfPaths;
+  cvYamlPaths?: CvYamlPaths;
+};
 
-function buildPrompt({ kind, input, memory, today, pdfPaths }: BuildPromptArgs): string {
+function buildPrompt({ kind, input, memory, today, pdfPaths, cvYamlPaths }: BuildPromptArgs): string {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
+  if (kind === "cv-yaml" && cvYamlPaths) {
+    // Le skill « adapter le CV YAML du repo cv à une offre » (workflow n8n 2).
+    // L'instruction et les garde-fous vivent dans lib/cv-adapt.mjs, testés —
+    // ils remplacent le prompt d'agent LangChain qui vivait dans n8n.
+    return promptCvYaml({ chemins: cvYamlPaths });
+  }
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging.${mem}
 
@@ -79,7 +94,14 @@ Posting URL: ${input}`;
 }
 
 export async function POST(req: Request) {
-  let body: { kind?: string; input?: string; cliId?: string };
+  let body: {
+    kind?: string;
+    input?: string;
+    cliId?: string;
+    // Additif, uniquement lu par kind "cv-yaml" : n8n envoie le CV d'origine
+    // (locales/fr.yml du repo cv) et l'offre. Les autres kinds l'ignorent.
+    payload?: { yaml?: string; offre?: Record<string, unknown>; keywords?: unknown[]; consigne?: string };
+  };
   try {
     body = await req.json();
   } catch {
@@ -101,7 +123,14 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = {
+    evaluate: "modes/oferta.md",
+    "fix-portal": "verify-portals.mjs",
+    pdf: "generate-pdf.mjs",
+    // cv-yaml fait suivre modes/pdf.md à l'agent : sans le mode, il improviserait
+    // sa propre méthode de tailoring — exactement ce que la consigne interdit.
+    "cv-yaml": "modes/pdf.md",
+  };
   const required = needsScript[kind];
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
@@ -115,7 +144,7 @@ export async function POST(req: Request) {
 
   // An A–F score is meaningless without a CV to score against — the CLI would
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
-  if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
+  if ((kind === "evaluate" || kind === "pdf" || kind === "cv-yaml") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
     return new Response(
       JSON.stringify({ error: "Ajoutez d'abord votre CV pour que je puisse évaluer cette offre par rapport à vous — déposez-le sur la page d'accueil." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
@@ -156,7 +185,50 @@ export async function POST(req: Request) {
     }
   }
 
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, pdfPaths });
+  // cv-yaml : le backend dépose l'entrée (CV d'origine + contexte de l'offre) et
+  // impose le chemin de sortie, exactement comme le mode pdf. L'agent ne choisit
+  // aucun nom de fichier, et l'existence de la sortie après le run est la PREUVE
+  // qu'il a travaillé — un CV muet ne peut pas passer pour un CV adapté.
+  let cvYamlPaths: CvYamlPaths | undefined;
+  let cvYamlOriginal = "";
+  if (kind === "cv-yaml") {
+    cvYamlOriginal = String(body.payload?.yaml ?? "");
+    if (!cvYamlOriginal.trim()) {
+      return new Response(
+        JSON.stringify({ error: "payload.yaml requis : le CV d'origine (locales/fr.yml du repo cv) doit être fourni" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    const r = cheminsCvYaml(input, careerOpsRoot());
+    if (!r.ok) {
+      return new Response(JSON.stringify({ error: r.error }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
+    cvYamlPaths = r.chemins;
+    try {
+      fs.mkdirSync(cvYamlPaths.dir, { recursive: true });
+      // La sortie d'un run précédent doit disparaître AVANT celui-ci : sinon un
+      // agent qui n'écrit rien passerait la porte d'honnêteté sur un vieux
+      // fichier, et n8n commiterait un CV adapté pour une AUTRE offre.
+      fs.rmSync(cvYamlPaths.sortie, { force: true });
+      fs.writeFileSync(cvYamlPaths.original, cvYamlOriginal, "utf8");
+      fs.writeFileSync(
+        cvYamlPaths.contexte,
+        JSON.stringify(
+          contexteCvYaml({ offre: body.payload?.offre, motsCles: body.payload?.keywords, consigne: body.payload?.consigne }),
+          null,
+          2,
+        ),
+        "utf8",
+      );
+    } catch (e) {
+      return new Response(
+        JSON.stringify({ error: `préparation du run cv-yaml impossible : ${e instanceof Error ? e.message : String(e)}` }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      );
+    }
+  }
+
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, pdfPaths, cvYamlPaths });
 
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
   // guardrail). 'evaluate'/'fix-portal' run the REAL mode + persist canonical
@@ -169,12 +241,20 @@ export async function POST(req: Request) {
   // (sub-agents) is always blocked (runaway cost). NEVER auto-submits — that is
   // a prompt-level guarantee. Claude-only: the Gemini fallbacks get an equivalent
   // scope via --approval-mode (see buildChain / geminiArgsFor).
+  //
+  // 'cv-yaml' a besoin de Read (modes/pdf.md, cv.md, profile.yml, les fichiers
+  // de travail) et de Write (le CV adapté). Rien d'autre : ni Bash, ni réseau.
+  // Tout le contexte de l'offre est DÉJÀ sur disque, donc une WebFetch ne
+  // pourrait qu'introduire du contenu que personne n'a vérifié dans un document
+  // qui part chez un recruteur.
   const tools =
     kind === "evaluate" || kind === "fix-portal"
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
       : kind === "pdf"
         ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Glob,Grep", disallowed: "Bash,Task,NotebookEdit" }
-        : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
+        : kind === "cv-yaml"
+          ? { allowed: "Read,Write,Edit,Glob,Grep", disallowed: "Bash,WebFetch,WebSearch,Task,NotebookEdit" }
+          : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
@@ -403,6 +483,32 @@ export async function POST(req: Request) {
               if (!emittedText && !sawError) return "Le CLI n'a rien produit — est-il bien installé et connecté ? (career-ops fonctionne au mieux avec Claude Code.)";
               return null;
             };
+
+            if (kind === "cv-yaml") {
+              const baseErrCv = noOutputError();
+              if (baseErrCv) return fail(baseErrCv);
+              if (!cvYamlPaths) return fail("Chemins de travail du CV manquants : ce traitement n'a rien pu écrire.");
+              let rendu = "";
+              try {
+                rendu = fs.readFileSync(cvYamlPaths.sortie, "utf8");
+              } catch {
+                rendu = "";
+              }
+              if (!rendu.trim() || !cleanExit || sawError) {
+                return fail(
+                  "Ce traitement n'a produit aucun CV adapté — le CV d'origine n'a pas été modifié. Relancez-le pour vérifier.",
+                );
+              }
+              // Les quatre vérifications déterministes (clé perdue, date réécrite,
+              // ancienneté inventée, volume anormal) : un prompt se contourne, elles non.
+              const verdict = verifieCvAdapte({ original: cvYamlOriginal, adapte: rendu });
+              if (!verdict.ok) return fail(`CV adapté refusé : ${verdict.motif}`);
+              for (const w of verdict.avertissements) send({ type: "text", text: `⚠️ ${w}\n` });
+              // L'artefact EST le résultat : n8n lit cet évènement et rien d'autre.
+              send({ type: "artifact", artifact: "cv-yaml", adaptedYaml: verdict.adaptedYaml });
+              send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+              return finishAttempt(true);
+            }
 
             if (kind === "pdf") {
               // Non-empty, not just existing: paired with clearing pdfPaths.html/meta
