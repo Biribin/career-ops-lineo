@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, Sparkles, X } from "lucide-react";
 import { LancerRechercheBouton } from "@/components/lancer-recherche-bouton";
 
 // Les offres rapportées par le workflow n8n « 1. Decouverte des offres », avec
@@ -27,6 +27,9 @@ type Offre = {
 export function OffresDecouvertes() {
   const [offres, setOffres] = useState<Offre[]>([]);
   const [chargement, setChargement] = useState(true);
+  // jobId en cours de traitement, et le dernier message (succès ou échec).
+  const [enCours, setEnCours] = useState<string | null>(null);
+  const [avis, setAvis] = useState<{ ton: "ok" | "erreur"; texte: string } | null>(null);
 
   const charger = useCallback(() => {
     setChargement(true);
@@ -41,6 +44,35 @@ export function OffresDecouvertes() {
     charger();
   }, [charger]);
 
+  // On ne retire la carte QU'APRÈS la réponse du serveur. Un retrait optimiste
+  // ferait disparaître une offre dont la génération a échoué : elle serait
+  // perdue de vue alors que rien n'a été rédigé.
+  const decider = useCallback(async (jobId: string, action: "generer" | "ecarter") => {
+    setEnCours(jobId);
+    setAvis(null);
+    try {
+      const rep = await fetch("/api/offers/decision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, action }),
+      });
+      const j = (await rep.json()) as { ok?: boolean; error?: string; message?: string; avertissement?: string };
+      if (!rep.ok || !j.ok) {
+        setAvis({ ton: "erreur", texte: j.error || `échec (${rep.status})` });
+        return;
+      }
+      setOffres((liste) => liste.filter((o) => o.jobId !== jobId));
+      setAvis({
+        ton: "ok",
+        texte: j.avertissement || j.message || "offre écartée — elle ne reviendra pas",
+      });
+    } catch (e) {
+      setAvis({ ton: "erreur", texte: e instanceof Error ? e.message : "appel impossible" });
+    } finally {
+      setEnCours(null);
+    }
+  }, []);
+
   // MEMES classes de conteneur que PipelineView (mx-auto max-w-6xl px-6) : sans
   // elles, ce bloc s'etalait plein ecran alors que « Candidatures » est centre,
   // ce qui donnait deux largeurs differentes sur la meme page.
@@ -51,8 +83,9 @@ export function OffresDecouvertes() {
           <h2 className="text-lg font-medium text-foreground">Recherche n8n</h2>
           <p className="text-sm text-muted">
             Offres rapportées par le workflow n8n, cherchées sur France&nbsp;Travail avec les mots-clés de{" "}
-            <code>portals.yml</code> puis triées. File distincte du «&nbsp;À trier&nbsp;» ci-dessus, qui vient du
-            scanner local.
+            <code>portals.yml</code> puis triées. Deux issues&nbsp;: <strong>Générer</strong> rédige lettre et CV,
+            puis dépose la candidature dans «&nbsp;À valider&nbsp;»&nbsp;; <strong>Écarter</strong> la retire pour de
+            bon — elle ne reviendra pas, même si une prochaine tournée la retrouve.
           </p>
         </div>
         <button
@@ -70,6 +103,18 @@ export function OffresDecouvertes() {
             donc pas tout de suite, c'est le bouton Rafraîchir qui sert. */}
         <LancerRechercheBouton />
       </div>
+
+      {avis && (
+        <p
+          className={`mt-3 rounded-xl border p-3 text-sm ${
+            avis.ton === "ok"
+              ? "border-brand/30 bg-brand/10 text-foreground"
+              : "border-red-500/40 bg-red-500/10 text-foreground"
+          }`}
+        >
+          {avis.texte}
+        </p>
+      )}
 
       {!chargement && offres.length === 0 && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
@@ -95,16 +140,42 @@ export function OffresDecouvertes() {
                 </span>
               </div>
               {o.whyMatch && <p className="mt-2 text-sm text-muted">{o.whyMatch}</p>}
-              {o.url && (
-                <a
-                  href={o.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-2 inline-block text-xs text-brand hover:underline"
+
+              {/* Trois affordances, pas une de plus : lire l'annonce, lancer la
+                  rédaction, ou écarter. Toute autre décision se prend ailleurs —
+                  la fiche rédigée part dans « À valider ». */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => decider(o.jobId, "generer")}
+                  disabled={enCours !== null}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
-                  Voir l’offre
-                </a>
-              )}
+                  {enCours === o.jobId ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-3.5" />
+                  )}
+                  Générer la candidature
+                </button>
+                <button
+                  onClick={() => decider(o.jobId, "ecarter")}
+                  disabled={enCours !== null}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:text-foreground disabled:opacity-50"
+                >
+                  <X className="size-3.5" />
+                  Écarter
+                </button>
+                {o.url && (
+                  <a
+                    href={o.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-brand hover:underline"
+                  >
+                    Voir l’offre
+                  </a>
+                )}
+              </div>
             </li>
           ))}
         </ul>

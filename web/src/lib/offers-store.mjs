@@ -67,6 +67,27 @@ export function lignesAAjouter(corps, vuLe) {
   return { lignes: retenues, ecartees };
 }
 
+/** Les deux décisions qui SORTENT une offre de la file, définitivement. */
+export const STATUTS_CLASSANTS = ["ECARTEE", "GENEREE"];
+
+/**
+ * La ligne à ajouter au journal quand Linéo tranche sur une offre.
+ *
+ * `ECARTEE` : il n'en veut pas. `GENEREE` : la candidature est partie en
+ * rédaction, elle vit maintenant dans « À valider », plus ici.
+ *
+ * @param {string} jobId
+ * @param {'ecarter'|'generer'} action
+ * @param {string} quand  horodatage ISO, INJECTÉ (tests déterministes)
+ */
+export function ligneDecision(jobId, action, quand) {
+  const id = txt(jobId);
+  if (!id) return null;
+  const statut = action === "generer" ? "GENEREE" : action === "ecarter" ? "ECARTEE" : null;
+  if (!statut) return null;
+  return { jobId: id, statut, decide_le: quand, vu_le: quand };
+}
+
 /**
  * Réduit un journal append-only à l'état courant.
  *
@@ -74,14 +95,31 @@ export function lignesAAjouter(corps, vuLe) {
  * ligne la PLUS RÉCENTE qui fait foi. Sans ça, une offre rescannée apparaîtrait
  * deux fois dans l'app.
  *
+ * ⚠️ MAIS une décision de Linéo est COLLANTE, et ça ne se déduit pas de l'ordre
+ * des lignes. Une offre écartée que la tournée du lendemain reposte réapparaît
+ * sinon, parce que sa ligne `A_DECIDER` est plus récente que son `ECARTEE` — et
+ * il faudrait l'écarter encore, tous les jours. Même chose pour une offre déjà
+ * partie en rédaction : la revoir ici, c'est risquer de candidater deux fois.
+ * D'où le balayage préalable : un `ECARTEE` ou un `GENEREE` n'importe où dans
+ * l'historique sort l'offre pour de bon.
+ *
  * @param {Array<Record<string, unknown>>} journal
  */
 export function etatCourant(journal) {
-  const parId = new Map();
-  for (const ligne of Array.isArray(journal) ? journal : []) {
+  const lignes = Array.isArray(journal) ? journal : [];
+
+  const classees = new Set();
+  for (const ligne of lignes) {
     if (!ligne || typeof ligne !== "object") continue;
     const jobId = txt(ligne.jobId);
-    if (!jobId) continue;
+    if (jobId && STATUTS_CLASSANTS.includes(txt(ligne.statut))) classees.add(jobId);
+  }
+
+  const parId = new Map();
+  for (const ligne of lignes) {
+    if (!ligne || typeof ligne !== "object") continue;
+    const jobId = txt(ligne.jobId);
+    if (!jobId || classees.has(jobId)) continue;
     parId.set(jobId, ligne);
   }
 
@@ -93,6 +131,31 @@ export function etatCourant(journal) {
     if (sb !== sa) return sb - sa;
     return String(b.vu_le ?? "").localeCompare(String(a.vu_le ?? ""));
   });
+}
+
+/**
+ * Retrouve l'offre COMPLÈTE derrière un jobId, pour construire le payload du
+ * workflow 2.
+ *
+ * On ne peut pas prendre bêtement la dernière ligne : une ligne de décision ne
+ * porte qu'un `jobId` et un `statut`. On remonte donc à la dernière ligne qui a
+ * vraiment du contenu, sinon on enverrait à n8n une offre vide et il échouerait
+ * sur « ni title ni description ».
+ *
+ * @param {Array<Record<string, unknown>>} journal
+ * @param {string} jobId
+ */
+export function offreComplete(journal, jobId) {
+  const id = txt(jobId);
+  if (!id) return null;
+  let trouvee = null;
+  for (const ligne of Array.isArray(journal) ? journal : []) {
+    if (!ligne || typeof ligne !== "object") continue;
+    if (txt(ligne.jobId) !== id) continue;
+    if (!txt(ligne.title) && !txt(ligne.description)) continue;
+    trouvee = ligne;
+  }
+  return trouvee;
 }
 
 /** Lit un JSONL en tolérant les lignes corrompues (écriture interrompue). */

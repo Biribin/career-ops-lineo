@@ -9,9 +9,17 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { etatCourant, lignesAAjouter, normaliseOffreRecue, parseJournal } from "../../src/lib/offers-store.mjs";
+import {
+  etatCourant,
+  lignesAAjouter,
+  ligneDecision,
+  normaliseOffreRecue,
+  offreComplete,
+  parseJournal,
+} from "../../src/lib/offers-store.mjs";
 
 const T = "2026-08-06T12:00:00.000Z";
+const T2 = "2026-08-07T12:00:00.000Z";
 
 test("une offre sans jobId est ecartee, pas stockee", () => {
   assert.equal(normaliseOffreRecue({ title: "sans id" }), null);
@@ -69,4 +77,64 @@ test("journal vide ou absent : etat vide, pas de crash", () => {
   assert.deepEqual(parseJournal(null), []);
   assert.deepEqual(etatCourant([]), []);
   assert.deepEqual(etatCourant(null), []);
+});
+
+// ── Les decisions de Lineo, et leur caractere COLLANT ────────────────────────
+
+test("une offre ecartee disparait de la file", () => {
+  const etat = etatCourant([
+    { jobId: "A", title: "a garder", score: 90, vu_le: T },
+    { jobId: "B", title: "a jeter", score: 80, vu_le: T },
+    ligneDecision("B", "ecarter", T2),
+  ]);
+  assert.deepEqual(etat.map((o) => o.jobId), ["A"]);
+});
+
+test("LE test qui compte : une offre ecartee ne revient PAS a la tournee suivante", () => {
+  // Le journal est append-only et la ligne la plus recente fait foi. Sans le
+  // balayage des statuts classants, le rescan du lendemain ressusciterait
+  // l'offre et Lineo devrait l'ecarter tous les jours.
+  const etat = etatCourant([
+    { jobId: "B", title: "a jeter", score: 80, vu_le: T },
+    ligneDecision("B", "ecarter", T),
+    { jobId: "B", title: "a jeter", score: 80, vu_le: T2 }, // repostee par n8n, PLUS RECENTE
+  ]);
+  assert.deepEqual(etat, [], "l'ecart doit gagner contre une ligne de scan plus recente");
+});
+
+test("une offre partie en redaction ne revient pas non plus", () => {
+  // Elle vit maintenant dans « A valider ». La revoir ici, c'est risquer de
+  // candidater deux fois chez le meme employeur.
+  const etat = etatCourant([
+    { jobId: "C", title: "en cours", score: 70, vu_le: T },
+    ligneDecision("C", "generer", T),
+    { jobId: "C", title: "en cours", score: 70, vu_le: T2 },
+  ]);
+  assert.deepEqual(etat, []);
+});
+
+test("ligneDecision refuse ce qui n'est pas une decision", () => {
+  assert.equal(ligneDecision("", "ecarter", T), null);
+  assert.equal(ligneDecision("A", "supprimer-tout", T), null);
+  assert.equal(ligneDecision("A", "", T), null);
+  assert.deepEqual(ligneDecision("A", "generer", T), {
+    jobId: "A",
+    statut: "GENEREE",
+    decide_le: T,
+    vu_le: T,
+  });
+});
+
+test("offreComplete ignore les lignes de decision, qui n'ont pas de contenu", () => {
+  // Sans ca on enverrait a n8n une offre vide, et il echouerait sur
+  // « ni title ni description ».
+  const journal = [
+    { jobId: "A", title: "ancien titre", description: "vieux texte", vu_le: T },
+    { jobId: "A", title: "titre a jour", description: "texte a jour", vu_le: T2 },
+    ligneDecision("A", "generer", T2),
+  ];
+  const o = offreComplete(journal, "A");
+  assert.equal(o.title, "titre a jour", "la derniere ligne AVEC du contenu fait foi");
+  assert.equal(offreComplete(journal, "inconnu"), null);
+  assert.equal(offreComplete(journal, ""), null);
 });
