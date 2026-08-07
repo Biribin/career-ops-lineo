@@ -8,7 +8,18 @@ import { CANONICAL_STATES, statusLabel } from "@/lib/format";
 // Status writeback control. Updates the existing tracker row (status cell) via
 // /api/status — never adds rows. Reverts on failure; confirms with the
 // terminal-popup animation.
-export function StatusSelect({ n, current }: { n: string; current: string }) {
+//
+// `compact` sert dans le tableau du pipeline : le libellé « statut » y est
+// redondant (la colonne le dit déjà) et prendrait la place utile.
+export function StatusSelect({
+  n,
+  current,
+  compact = false,
+}: {
+  n: string;
+  current: string;
+  compact?: boolean;
+}) {
   const [status, setStatus] = useState(current);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -39,12 +50,17 @@ export function StatusSelect({ n, current }: { n: string; current: string }) {
   const known = (CANONICAL_STATES as readonly string[]).includes(status);
   return (
     <span className="inline-flex items-center gap-2">
-      <label className="text-xs text-faint">statut</label>
+      {!compact && <label className="text-xs text-faint">statut</label>}
       <select
         value={status}
         onChange={onChange}
         disabled={busy}
-        className="rounded-md border border-border bg-surface px-2.5 py-1 text-sm text-foreground outline-none transition-colors focus:border-brand/50 disabled:opacity-50 max-sm:min-h-[44px]"
+        aria-label="statut de la candidature"
+        className={
+          compact
+            ? "rounded-md border border-transparent bg-transparent px-1 py-0.5 text-sm text-muted outline-none transition-colors hover:border-border hover:bg-surface focus:border-brand/50 disabled:opacity-50 max-sm:min-h-[44px]"
+            : "rounded-md border border-border bg-surface px-2.5 py-1 text-sm text-foreground outline-none transition-colors focus:border-brand/50 disabled:opacity-50 max-sm:min-h-[44px]"
+        }
       >
         {/* value = jeton canonique écrit dans le tracker ; libellé = affichage FR */}
         {!known && <option value={status}>{statusLabel(status)}</option>}

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot, statusLabel } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
+import { StatusSelect } from "@/components/status-select";
 import { cn } from "@/lib/cn";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
@@ -249,10 +250,16 @@ export function PipelineView({
                   <td className="px-4 py-3">
                     <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
                   </td>
+                  {/* Statut MODIFIABLE ici, pas seulement sur la page du rapport.
+                      Une candidature envoyée à la main (France Travail, site de
+                      l'entreprise…) n'a pas de rapport : sans ce contrôle, aucun
+                      moyen d'enregistrer qu'on a reçu une réponse, décroché un
+                      entretien ou été refusé. La pastille reste : elle donne la
+                      couleur d'un coup d'œil, le menu sert à la changer. */}
                   <td className="px-4 py-3 text-muted">
                     <span className="inline-flex items-center gap-1.5">
                       <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(r.status))} />
-                      {statusLabel(r.status)}
+                      <StatusSelect n={String(r.n)} current={canonStatus(r.status)} compact />
                     </span>
                   </td>
                   <td className="px-4 py-3 text-faint tabular-nums">{r.date}</td>

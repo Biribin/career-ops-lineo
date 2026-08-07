@@ -70,7 +70,7 @@ export async function POST(req: Request) {
   const jobId = String(corps.jobId ?? "").trim();
   const action = String(corps.action ?? "").trim().toLowerCase();
   if (!jobId) return Response.json({ error: "jobId requis" }, { status: 400 });
-  if (action !== "generer" && action !== "ecarter") {
+  if (action !== "generer" && action !== "ecarter" && action !== "postuler") {
     return Response.json({ error: `action inconnue : ${action || "(vide)"}` }, { status: 400 });
   }
 
@@ -78,11 +78,16 @@ export async function POST(req: Request) {
   const ligne = ligneDecision(jobId, action, quand);
   if (!ligne) return Response.json({ error: "décision inexploitable" }, { status: 400 });
 
-  // ── Écarter : rien à appeler, on inscrit et c'est fini ────────────────────
-  if (action === "ecarter") {
+  // ── Écarter, ou marquer « postulé à la main » ─────────────────────────────
+  // Dans les deux cas il n'y a rien à déclencher ici : l'offre sort de la file,
+  // point. Pour `postuler`, la ligne du tracker est écrite par l'appelant via
+  // /api/tracker/set-status AVANT d'arriver ici — l'ordre compte, et c'est
+  // pour ça qu'il n'est pas inversé : si le tracker refuse, l'offre doit rester
+  // visible plutôt que de disparaître sans être suivie nulle part.
+  if (action === "ecarter" || action === "postuler") {
     const err = ajouteAuJournal(ligne);
     if (err) return Response.json({ error: err }, { status: 500 });
-    return Response.json({ ok: true, jobId, statut: "ECARTEE" });
+    return Response.json({ ok: true, jobId, statut: ligne.statut });
   }
 
   // ── Générer : il faut le contenu de l'offre, et n8n doit accuser réception ─

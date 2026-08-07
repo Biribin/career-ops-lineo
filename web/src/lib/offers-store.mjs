@@ -67,23 +67,34 @@ export function lignesAAjouter(corps, vuLe) {
   return { lignes: retenues, ecartees };
 }
 
-/** Les deux décisions qui SORTENT une offre de la file, définitivement. */
-export const STATUTS_CLASSANTS = ["ECARTEE", "GENEREE"];
+/** Les décisions qui SORTENT une offre de la file, définitivement. */
+export const STATUTS_CLASSANTS = ["ECARTEE", "GENEREE", "POSTULEE"];
+
+/** action reçue → statut inscrit au journal. */
+const STATUT_PAR_ACTION = {
+  ecarter: "ECARTEE",
+  generer: "GENEREE",
+  postuler: "POSTULEE",
+};
 
 /**
  * La ligne à ajouter au journal quand Linéo tranche sur une offre.
  *
- * `ECARTEE` : il n'en veut pas. `GENEREE` : la candidature est partie en
- * rédaction, elle vit maintenant dans « À valider », plus ici.
+ * `ECARTEE`  : il n'en veut pas.
+ * `GENEREE`  : la candidature part en rédaction, elle vit dans « À valider ».
+ * `POSTULEE` : il a postulé LUI-MÊME, ailleurs (France Travail, site de
+ *              l'entreprise…). Rien à rédiger, mais la ligne doit exister dans
+ *              le tracker, sinon il ne pourra jamais enregistrer la réponse —
+ *              ni le refus.
  *
  * @param {string} jobId
- * @param {'ecarter'|'generer'} action
+ * @param {'ecarter'|'generer'|'postuler'} action
  * @param {string} quand  horodatage ISO, INJECTÉ (tests déterministes)
  */
 export function ligneDecision(jobId, action, quand) {
   const id = txt(jobId);
   if (!id) return null;
-  const statut = action === "generer" ? "GENEREE" : action === "ecarter" ? "ECARTEE" : null;
+  const statut = STATUT_PAR_ACTION[action];
   if (!statut) return null;
   return { jobId: id, statut, decide_le: quand, vu_le: quand };
 }

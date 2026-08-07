@@ -113,6 +113,17 @@ test("une offre partie en redaction ne revient pas non plus", () => {
   assert.deepEqual(etat, []);
 });
 
+test("une offre a laquelle Lineo a postule LUI-MEME sort aussi de la file", () => {
+  // Il a candidate sur France Travail. Rien a rediger, mais l'offre ne doit plus
+  // encombrer la file — et surtout ne pas revenir a la tournee suivante.
+  const etat = etatCourant([
+    { jobId: "D", title: "postulee a la main", score: 60, vu_le: T },
+    ligneDecision("D", "postuler", T),
+    { jobId: "D", title: "postulee a la main", score: 60, vu_le: T2 },
+  ]);
+  assert.deepEqual(etat, []);
+});
+
 test("ligneDecision refuse ce qui n'est pas une decision", () => {
   assert.equal(ligneDecision("", "ecarter", T), null);
   assert.equal(ligneDecision("A", "supprimer-tout", T), null);
@@ -123,6 +134,7 @@ test("ligneDecision refuse ce qui n'est pas une decision", () => {
     decide_le: T,
     vu_le: T,
   });
+  assert.equal(ligneDecision("A", "postuler", T).statut, "POSTULEE");
 });
 
 test("offreComplete ignore les lignes de decision, qui n'ont pas de contenu", () => {

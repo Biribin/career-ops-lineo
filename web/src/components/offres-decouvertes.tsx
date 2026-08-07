@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw, Sparkles, X } from "lucide-react";
+import { Hand, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
 import { LancerRechercheBouton } from "@/components/lancer-recherche-bouton";
 
 // Les offres rapportées par le workflow n8n « 1. Decouverte des offres », avec
@@ -47,10 +47,37 @@ export function OffresDecouvertes() {
   // On ne retire la carte QU'APRÈS la réponse du serveur. Un retrait optimiste
   // ferait disparaître une offre dont la génération a échoué : elle serait
   // perdue de vue alors que rien n'a été rédigé.
-  const decider = useCallback(async (jobId: string, action: "generer" | "ecarter") => {
+  const decider = useCallback(async (jobId: string, action: "generer" | "ecarter" | "postuler", offre?: Offre) => {
     setEnCours(jobId);
     setAvis(null);
     try {
+      // « Postulé à la main » : la ligne du tracker D'ABORD. Si elle échoue,
+      // l'offre reste affichée — mieux vaut la revoir que la perdre sans
+      // qu'elle soit suivie nulle part. C'est cette ligne qui permettra
+      // ensuite d'enregistrer la réponse, l'entretien ou le refus.
+      if (action === "postuler") {
+        const t = await fetch("/api/tracker/set-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entreprise: offre?.company ?? "",
+            role: offre?.title ?? "",
+            statut: "Applied",
+            creer: true,
+            note: `Postulé à la main le ${new Date().toISOString().slice(0, 10)}${offre?.url ? ` — ${offre.url}` : ""}`,
+          }),
+        });
+        const tj = (await t.json()) as { ok?: boolean; error?: string; num?: number; relance?: { prochaine?: string } };
+        if (!t.ok || !tj.ok) {
+          setAvis({ ton: "erreur", texte: tj.error || `le tracker a refusé (${t.status})` });
+          return;
+        }
+        setAvis({
+          ton: "ok",
+          texte: `suivie sous le n° ${tj.num ?? "?"}${tj.relance?.prochaine ? ` — relance prévue le ${tj.relance.prochaine}` : ""}`,
+        });
+      }
+
       const rep = await fetch("/api/offers/decision", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -62,10 +89,14 @@ export function OffresDecouvertes() {
         return;
       }
       setOffres((liste) => liste.filter((o) => o.jobId !== jobId));
-      setAvis({
-        ton: "ok",
-        texte: j.avertissement || j.message || "offre écartée — elle ne reviendra pas",
-      });
+      // Pour « postuler », l'avis a déjà été posé plus haut (numéro de suivi et
+      // date de relance) : on ne l'écrase pas par un message plus pauvre.
+      if (action !== "postuler") {
+        setAvis({
+          ton: "ok",
+          texte: j.avertissement || j.message || "offre écartée — elle ne reviendra pas",
+        });
+      }
     } catch (e) {
       setAvis({ ton: "erreur", texte: e instanceof Error ? e.message : "appel impossible" });
     } finally {
@@ -83,9 +114,10 @@ export function OffresDecouvertes() {
           <h2 className="text-lg font-medium text-foreground">Recherche n8n</h2>
           <p className="text-sm text-muted">
             Offres rapportées par le workflow n8n, cherchées sur France&nbsp;Travail avec les mots-clés de{" "}
-            <code>portals.yml</code> puis triées. Deux issues&nbsp;: <strong>Générer</strong> rédige lettre et CV,
-            puis dépose la candidature dans «&nbsp;À valider&nbsp;»&nbsp;; <strong>Écarter</strong> la retire pour de
-            bon — elle ne reviendra pas, même si une prochaine tournée la retrouve.
+            <code>portals.yml</code> puis triées. Trois issues&nbsp;: <strong>Générer</strong> rédige lettre et CV,
+            puis dépose la candidature dans «&nbsp;À valider&nbsp;»&nbsp;; <strong>J’ai postulé à la main</strong>{" "}
+            crée la ligne de suivi pour une candidature envoyée ailleurs&nbsp;; <strong>Écarter</strong> la retire
+            pour de bon — elle ne reviendra pas, même si une prochaine tournée la retrouve.
           </p>
         </div>
         <button
@@ -156,6 +188,15 @@ export function OffresDecouvertes() {
                     <Sparkles className="size-3.5" />
                   )}
                   Générer la candidature
+                </button>
+                <button
+                  onClick={() => decider(o.jobId, "postuler", o)}
+                  disabled={enCours !== null}
+                  title="Tu as postulé toi-même (France Travail, site de l'entreprise…). Crée la ligne de suivi pour pouvoir enregistrer la réponse ensuite."
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:text-foreground disabled:opacity-50"
+                >
+                  <Hand className="size-3.5" />
+                  J’ai postulé à la main
                 </button>
                 <button
                   onClick={() => decider(o.jobId, "ecarter")}
