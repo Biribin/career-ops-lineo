@@ -178,3 +178,43 @@ test("une liste jobs vide EXPLICITE est acceptée", () => {
   const r = parseRank('{"jobs":[]}', { offresConnues: [] });
   assert.deepEqual(r.jobs, []);
 });
+
+// --- Adresse de contact de l'annonce ---
+
+test("normaliseOffre porte le courriel publié par France Travail", () => {
+  const o = normaliseOffre({ id: "1", intitule: "Dev", contact: { courriel: "RH@Acme.fr" } });
+  assert.equal(o.contactEmail, "RH@Acme.fr");
+});
+
+test("le prompt ne contient JAMAIS l'adresse de contact", () => {
+  // Le modèle juge la pertinence d'une offre : il n'a aucune raison de lire une
+  // adresse personnelle pour ça. C'est aussi une donnée de moins envoyée dehors.
+  const lot = [
+    normaliseOffre({ id: "1", intitule: "Dev", contact: { courriel: "rh@acme.fr" } }),
+  ];
+  const prompt = promptRank({ offres: lot, profil: "profil de test", maxRetenues: 5 });
+  assert.equal(prompt.includes("rh@acme.fr"), false);
+});
+
+test("le courriel du job final vient de la source, jamais du modèle", () => {
+  // LE point de sécurité de ce champ : une adresse inventée ferait partir une
+  // vraie candidature chez un inconnu. Ici le modèle en propose une autre —
+  // elle doit être ignorée, contrairement à title/company où il fait secours.
+  const connues = [
+    { jobId: "1", title: "Dev", company: "Acme", url: "https://x.test/1", location: "Paris", description: "", contactEmail: "vrai@acme.fr" },
+  ];
+  const { jobs } = parseRank(
+    JSON.stringify({ jobs: [{ jobId: "1", score: 80, whyMatch: "ok", contactEmail: "invente@ailleurs.test" }] }),
+    { offresConnues: connues },
+  );
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].contactEmail, "vrai@acme.fr");
+});
+
+test("une offre sans contact ressort avec une chaîne vide", () => {
+  const connues = [{ jobId: "1", title: "Dev", company: "Acme", url: "https://x.test/1", location: "", description: "" }];
+  const { jobs } = parseRank(JSON.stringify({ jobs: [{ jobId: "1", score: 50, whyMatch: "ok" }] }), {
+    offresConnues: connues,
+  });
+  assert.equal(jobs[0].contactEmail, "");
+});

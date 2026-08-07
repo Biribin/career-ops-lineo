@@ -9,14 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  etatCourant,
-  lignesAAjouter,
-  ligneDecision,
-  normaliseOffreRecue,
-  offreComplete,
-  parseJournal,
-} from "../../src/lib/offers-store.mjs";
+import { courrielContact, etatCourant, ligneDecision, lignesAAjouter, normaliseOffreRecue, offreComplete, parseJournal } from "../../src/lib/offers-store.mjs";
 
 const T = "2026-08-06T12:00:00.000Z";
 const T2 = "2026-08-07T12:00:00.000Z";
@@ -149,4 +142,51 @@ test("offreComplete ignore les lignes de decision, qui n'ont pas de contenu", ()
   assert.equal(o.title, "titre a jour", "la derniere ligne AVEC du contenu fait foi");
   assert.equal(offreComplete(journal, "inconnu"), null);
   assert.equal(offreComplete(journal, ""), null);
+});
+
+// --- Adresse de contact de l'annonce (champ contact.courriel de France Travail) ---
+//
+// Elle finit comme DESTINATAIRE d'un vrai mail. Le principe est donc l'inverse
+// de l'habituel : dans le doute on ne rend RIEN, pour que la candidature parte
+// à une adresse devinée (comportement actuel) plutôt qu'à la mauvaise personne.
+
+test("courrielContact accepte une adresse simple et la normalise", () => {
+  assert.equal(courrielContact("  Recrutement@Acme.FR "), "recrutement@acme.fr");
+});
+
+test("courrielContact refuse tout ce qui n'est pas UNE adresse nue", () => {
+  for (const douteux of [
+    "Jean Dupont <jean@acme.fr>", // nom affiché : on ne découpe pas au jugé
+    "a@acme.fr, b@acme.fr", // deux destinataires
+    "a@acme.fr; b@acme.fr",
+    "pas-une-adresse",
+    "a@acme", // pas de domaine de premier niveau
+    "@acme.fr",
+    "a@.fr",
+    "",
+    null,
+    undefined,
+  ]) {
+    assert.equal(courrielContact(douteux), "", `aurait dû être refusé : ${String(douteux)}`);
+  }
+});
+
+test("courrielContact borne la longueur", () => {
+  assert.equal(courrielContact("a".repeat(250) + "@acme.fr"), "");
+});
+
+test("normaliseOffreRecue porte le courriel, quel que soit son nom d'origine", () => {
+  // Le nom du champ dépend du nœud n8n qui a construit le lot : on accepte les
+  // trois plutôt que d'imposer un renommage en amont.
+  for (const cle of ["contactEmail", "contact_email", "courriel"]) {
+    const o = normaliseOffreRecue({ jobId: "1", [cle]: "rh@acme.fr" });
+    assert.equal(o.contactEmail, "rh@acme.fr", `via ${cle}`);
+  }
+});
+
+test("une offre sans courriel exploitable en ressort avec une chaîne vide", () => {
+  // Et surtout PAS `undefined` : le workflow 2 teste la présence du champ, une
+  // clé absente et une adresse invalide doivent se comporter pareil.
+  assert.equal(normaliseOffreRecue({ jobId: "1" }).contactEmail, "");
+  assert.equal(normaliseOffreRecue({ jobId: "1", contactEmail: "n'importe quoi" }).contactEmail, "");
 });

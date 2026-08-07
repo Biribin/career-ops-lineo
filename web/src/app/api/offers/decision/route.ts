@@ -44,6 +44,7 @@ type LigneOffre = {
   location?: string;
   whyMatch?: string;
   score?: number | null;
+  contactEmail?: string;
 };
 
 function ajouteAuJournal(ligne: Record<string, unknown>): string | null {
@@ -110,6 +111,10 @@ export async function POST(req: Request) {
       location: offre.location ?? "",
       whyMatch: offre.whyMatch ?? "",
       score: offre.score ?? null,
+      // L'adresse publiée avec l'annonce. Le workflow 2 s'en sert comme
+      // destinataire ; vide, il retombe sur son comportement habituel (adresse
+      // devinée ou envoi manuel). Mieux vaut pas d'adresse qu'une mauvaise.
+      contactEmail: offre.contactEmail ?? "",
     },
   };
 

@@ -64,6 +64,14 @@ export function normaliseOffre(o) {
     url: txt(src.origineOffre?.urlOrigine || src.url),
     date: txt(src.dateCreation || src.date),
     description: txt(src.description).slice(0, MAX_DESCRIPTION),
+    // L'adresse publiee avec l'annonce (`contact.courriel` chez France Travail).
+    // Elle sert de destinataire a la candidature : sans elle, le mail part a une
+    // adresse devinee alors que l'employeur a dit ou ecrire.
+    //
+    // Volontairement ABSENTE du prompt (voir construitPrompt, qui enumere ses
+    // champs un par un) : le modele n'a aucune raison de lire une adresse
+    // personnelle pour juger de la pertinence d'une offre.
+    contactEmail: txt(src.contact?.courriel || src.contactEmail),
   };
 }
 
@@ -227,6 +235,11 @@ export function parseRank(brut, { offresConnues = [] } = {}) {
       url: txt(j.url) || source?.url || "",
       location: txt(j.location) || source?.location || "",
       description: source?.description ?? "",
+      // JAMAIS `j.contactEmail` : l'adresse vient de l'offre d'origine, point.
+      // Un modele qui inventerait un destinataire ferait partir une vraie
+      // candidature chez un inconnu — c'est le seul champ ou il n'a aucun mot a
+      // dire, meme en secours.
+      contactEmail: source?.contactEmail ?? "",
       whyMatch: txt(j.whyMatch)
         .replace(/\*\*([^*]+)\*\*/g, "$1")
         .replace(/\s+[—–]\s+/g, ", ")

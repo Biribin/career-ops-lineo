@@ -14,6 +14,29 @@
 const txt = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
 
 /**
+ * L'adresse de contact publiée avec l'annonce (champ `contact.courriel` de
+ * l'API France Travail).
+ *
+ * Elle vaut la peine d'être portée jusqu'au bout : sans elle, la candidature
+ * part à une adresse devinée ou générique, alors que l'employeur a indiqué où
+ * écrire. C'est la différence entre atterrir chez le recruteur et dans un
+ * formulaire anonyme.
+ *
+ * Validée sévèrement parce qu'elle vient d'une machine distante et finira comme
+ * DESTINATAIRE d'un vrai mail : une valeur douteuse doit devenir une absence de
+ * destinataire (l'humain tranchera), jamais un envoi au mauvais endroit. Une
+ * seule adresse, pas de liste, pas de nom affiché — « Jean <a@b.fr>, c@d.fr »
+ * est rejeté plutôt que découpé au jugé.
+ */
+const COURRIEL = /^[^\s@,;<>"]+@[^\s@,;<>".]+\.[a-z]{2,}$/i;
+
+export function courrielContact(v) {
+  const brut = txt(v).toLowerCase();
+  if (!brut || brut.length > 254) return "";
+  return COURRIEL.test(brut) ? brut : "";
+}
+
+/**
  * Valide et normalise UNE offre reçue de n8n.
  * Renvoie null si elle est inexploitable — mieux vaut l'écarter que stocker une
  * ligne sans identifiant, qu'on ne pourrait plus ni dédupliquer ni valider.
@@ -33,6 +56,10 @@ export function normaliseOffreRecue(brut) {
     whyMatch: txt(o.whyMatch),
     score: Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : null,
     description: String(o.description ?? "").slice(0, 2000),
+    // Plusieurs noms possibles selon le nœud n8n qui a construit le lot : on
+    // accepte les trois plutôt que d'imposer un renommage en amont, mais une
+    // seule sortie normalisée.
+    contactEmail: courrielContact(o.contactEmail ?? o.contact_email ?? o.courriel),
   };
 }
 
