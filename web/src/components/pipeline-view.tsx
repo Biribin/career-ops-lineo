@@ -60,9 +60,20 @@ const SORT_LABELS: Record<SortKey, string> = {
 export function PipelineView({
   applications,
   inbox,
+  offresN8n,
+  nOffresN8n,
 }: {
   applications: Application[];
   inbox: InboxJob[];
+  // Rendu DANS l'onglet « À trier », comme sous-tableau de provenance. C'est une
+  // fusion d'AFFICHAGE seulement : les offres n8n restent dans leur propre
+  // journal (data/offres-n8n.jsonl). Les verser dans data/pipeline.md
+  // demanderait de passer par son écrivain sanctionné (scan.mjs sous
+  // pipeline-lock.mjs) — le contrat de données interdit d'y écrire directement.
+  offresN8n?: React.ReactNode;
+  // Compté côté serveur : le composant des offres est client, et sans ce nombre
+  // le badge de l'onglet annoncerait 2 au-dessus d'une liste de 8.
+  nOffresN8n?: number;
 }) {
   const params = useSearchParams();
   const router = useRouter();
@@ -149,7 +160,7 @@ export function PipelineView({
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">Candidatures</h1>
           <p className="mt-1 text-sm text-muted">
-            <span className="tabular-nums">{pendingInbox.length}</span> à trier ·{" "}
+            <span className="tabular-nums">{pendingInbox.length + (nOffresN8n ?? 0)}</span> à trier ·{" "}
             <span className="tabular-nums">{applications.length}</span> suivies
           </p>
         </div>
@@ -172,7 +183,7 @@ export function PipelineView({
         {TABS.map((t) => {
           const count =
             t === "INBOX"
-              ? pendingInbox.length
+              ? pendingInbox.length + (nOffresN8n ?? 0)
               : t === "ALL"
                 ? applications.length
                 : applications.filter((r) => canonStatus(r.status).includes(t)).length;
@@ -209,12 +220,17 @@ export function PipelineView({
       )}
 
       {tab === "INBOX" ? (
-        /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
-        pendingInbox.length > 0 ? (
-          <InboxTriage inbox={pendingInbox} />
-        ) : (
-          <InboxEmpty count={0} filtered={false} />
-        )
+        /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ──
+             Une seule file de tri, en sous-tableaux par provenance : le scanner
+             local et le forum n8n viennent de data/pipeline.md (InboxTriage),
+             France Travail vient du journal des offres n8n (offresN8n). */
+        <>
+          {pendingInbox.length > 0 && <InboxTriage inbox={pendingInbox} />}
+          {/* « Rien à trier » ne s'affiche que si les DEUX sources sont vides :
+              sinon on annonçait une file vide juste au-dessus de six offres. */}
+          {pendingInbox.length === 0 && (nOffresN8n ?? 0) === 0 && <InboxEmpty count={0} filtered={false} />}
+          {offresN8n}
+        </>
       ) : filtered.length > 0 ? (
         /* ── Tracker table ── */
         <div className="mt-4 overflow-hidden rounded-2xl border border-border">

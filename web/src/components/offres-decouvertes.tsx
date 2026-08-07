@@ -104,20 +104,24 @@ export function OffresDecouvertes() {
     }
   }, []);
 
-  // MEMES classes de conteneur que PipelineView (mx-auto max-w-6xl px-6) : sans
-  // elles, ce bloc s'etalait plein ecran alors que « Candidatures » est centre,
-  // ce qui donnait deux largeurs differentes sur la meme page.
+  // SOUS-TABLEAU de l'onglet « À trier », plus une section de page : d'où le h3
+  // et l'absence de conteneur centré (le parent s'en charge). Avoir deux files
+  // de triage a l'ecran, l'une sous l'autre, donnait l'impression de deux
+  // applications differentes.
   return (
-    <section className="mx-auto max-w-6xl px-6 pb-8 max-sm:pb-24">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section className="mt-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6">
         <div>
-          <h2 className="text-lg font-medium text-foreground">Recherche n8n</h2>
-          <p className="text-sm text-muted">
-            Offres rapportées par le workflow n8n, cherchées sur France&nbsp;Travail avec les mots-clés de{" "}
-            <code>portals.yml</code> puis triées. Trois issues&nbsp;: <strong>Générer</strong> rédige lettre et CV,
-            puis dépose la candidature dans «&nbsp;À valider&nbsp;»&nbsp;; <strong>J’ai postulé à la main</strong>{" "}
-            crée la ligne de suivi pour une candidature envoyée ailleurs&nbsp;; <strong>Écarter</strong> la retire
-            pour de bon — elle ne reviendra pas, même si une prochaine tournée la retrouve.
+          <h3 className="text-sm font-medium text-foreground">
+            France&nbsp;Travail <span className="text-faint">· via le workflow n8n</span>{" "}
+            <span className="tabular-nums text-faint">{offres.length}</span>
+          </h3>
+          <p className="mt-1 text-sm text-muted">
+            Cherchées avec les mots-clés de <code>portals.yml</code> puis triées. Trois issues&nbsp;:{" "}
+            <strong>Générer</strong> rédige lettre et CV, puis dépose la candidature dans «&nbsp;À
+            valider&nbsp;»&nbsp;; <strong>J’ai postulé à la main</strong> crée la ligne de suivi pour une
+            candidature envoyée ailleurs&nbsp;; <strong>Écarter</strong> la retire pour de bon — elle ne
+            reviendra pas, même si une prochaine tournée la retrouve.
           </p>
         </div>
         <button

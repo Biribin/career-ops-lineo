@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { cheminJournalOffres } from "@/lib/offers-journal";
 import { etatCourant, lignesAAjouter, parseJournal } from "@/lib/offers-store.mjs";
 
 export const runtime = "nodejs";
@@ -16,9 +16,7 @@ export const dynamic = "force-dynamic";
 // perdre l'une l'autre. `data/` est gitignoré mais sauvegardé (sync-data.sh
 // fonctionne par liste d'exclusion, et n'écarte que cache/ et applications.db).
 
-function journalPath(): string {
-  return path.join(careerOpsRoot(), "data", "offres-n8n.jsonl");
-}
+const journalPath = cheminJournalOffres;
 
 export async function GET() {
   const p = journalPath();

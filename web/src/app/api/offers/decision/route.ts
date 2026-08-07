@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
-import { ligneDecision, offreComplete, parseJournal } from "@/lib/offers-store.mjs";
+import { cheminJournalOffres, litJournalOffres } from "@/lib/offers-journal";
+import { ligneDecision, offreComplete } from "@/lib/offers-store.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,9 +33,7 @@ export const maxDuration = 60;
 const N8N_DEFAUT = "https://n8n.balzac-info.online";
 const CHEMIN_WF2 = "/webhook/candidature-generer";
 
-function journalPath(): string {
-  return path.join(careerOpsRoot(), "data", "offres-n8n.jsonl");
-}
+const journalPath = cheminJournalOffres;
 
 type LigneOffre = {
   jobId?: string;
@@ -91,14 +89,7 @@ export async function POST(req: Request) {
   }
 
   // ── Générer : il faut le contenu de l'offre, et n8n doit accuser réception ─
-  let journal: Record<string, unknown>[] = [];
-  try {
-    journal = parseJournal(fs.readFileSync(journalPath(), "utf8"));
-  } catch {
-    return Response.json({ error: "journal des offres introuvable" }, { status: 404 });
-  }
-
-  const offre = offreComplete(journal, jobId) as LigneOffre | null;
+  const offre = offreComplete(litJournalOffres(), jobId) as LigneOffre | null;
   if (!offre) {
     return Response.json({ error: `offre ${jobId} introuvable dans le journal` }, { status: 404 });
   }

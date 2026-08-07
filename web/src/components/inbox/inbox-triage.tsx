@@ -12,6 +12,20 @@ import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
 
+/**
+ * D'où vient une ligne de `data/pipeline.md`. Se déduit de l'URL, seule donnée
+ * disponible : le fichier ne porte pas de champ de provenance, et lui en ajouter
+ * un demanderait de passer par son écrivain sanctionné.
+ */
+function provenance(url: string): "forum" | "scanner" {
+  return (url || "").includes("community.n8n.io") ? "forum" : "scanner";
+}
+
+const GROUPES_PROVENANCE = [
+  { cle: "scanner" as const, libelle: "Trouvées par career-ops", detail: "scanner local, data/pipeline.md" },
+  { cle: "forum" as const, libelle: "n8n community", detail: "posts du forum — se répondent par un message" },
+];
+
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
 const CONFIG_KEY = "career-ops:config";
@@ -230,22 +244,42 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       )}
 
       {visible.length > 0 ? (
-        <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
-          {visible.map((e) => (
-            <TriageRow
-              key={e.job.url}
-              job={e.job}
-              source={e.source}
-              age={e.age}
-              scored={scoreByUrl.get(e.job.url)}
-              selected={selected.has(e.job.url)}
-              shortlisted={isShortlisted(e.job.url)}
-              onToggleSelect={() => toggleSelect(e.job.url)}
-              onSave={() => save(e.job)}
-              onSkip={() => skip(e.job)}
-            />
-          ))}
-        </ul>
+        /* Sous-tableaux par PROVENANCE. Ne pas confondre avec `source`, qui
+           désigne l'ATS (Workday, Greenhouse…) : ici c'est « d'où vient cette
+           ligne ». Un post du forum n8n et une annonce trouvée par le scanner
+           ne se traitent pas pareil — le premier se répond par un message, la
+           seconde par une candidature — et les voir mélangés sans étiquette
+           obligeait à deviner à chaque ligne. */
+        <div className="mt-3 space-y-5">
+          {GROUPES_PROVENANCE.map(({ cle, libelle, detail }) => {
+            const lot = visible.filter((e) => provenance(e.job.url) === cle);
+            if (lot.length === 0) return null;
+            return (
+              <div key={cle}>
+                <p className="mb-1.5 text-sm font-medium text-foreground">
+                  {libelle} <span className="tabular-nums text-faint">{lot.length}</span>
+                  <span className="ml-2 text-xs font-normal text-faint">{detail}</span>
+                </p>
+                <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
+                  {lot.map((e) => (
+                    <TriageRow
+                      key={e.job.url}
+                      job={e.job}
+                      source={e.source}
+                      age={e.age}
+                      scored={scoreByUrl.get(e.job.url)}
+                      selected={selected.has(e.job.url)}
+                      shortlisted={isShortlisted(e.job.url)}
+                      onToggleSelect={() => toggleSelect(e.job.url)}
+                      onSave={() => save(e.job)}
+                      onSkip={() => skip(e.job)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-10 text-center">
           <p className="font-display text-lg">Aucun résultat</p>
