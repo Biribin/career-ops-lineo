@@ -66,6 +66,48 @@ import path from "node:path";
 /** Les 4 décisions que n8n sait router. Toute autre valeur part en alerte. */
 export const DECISIONS = ["valider", "retoucher_lettre", "retoucher_cv", "refuser"];
 
+/**
+ * Les arguments de `set-status.mjs` pour inscrire un refus au tracker.
+ *
+ * POURQUOI `--create`. Une candidature préparée par n8n n'a AUCUNE ligne au
+ * tracker : les lignes naissent du flux d'évaluation local. Sans `--create`, le
+ * script sortait en erreur (« No tracker row with company matching … ») et la
+ * raison du refus n'atteignait jamais `data/applications.md` — donc jamais
+ * `analyze-patterns.mjs`, ni `/stats`, ni `/analytics`. Constaté le 2026-08-07
+ * sur trois refus réels : raison enregistrée dans le journal et en base, absente
+ * des statistiques. Or capturer ce motif est la SEULE raison pour laquelle une
+ * raison est rendue obligatoire à la saisie.
+ *
+ * Symétrique de ce que `/api/tracker/set-status` fait déjà pour l'envoi.
+ *
+ * Le rôle n'est pas décoratif : `set-status.mjs --create` l'exige, parce qu'une
+ * ligne sans rôle ne peut plus être départagée ensuite. Sans rôle exploitable on
+ * ne crée donc RIEN, et on le dit — plutôt que de miner une ligne muette.
+ *
+ * @param {{scriptPath: string, entreprise?: string, poste?: string, raison?: string}} args
+ * @returns {{ok: true, args: string[], creation: boolean} | {ok: false, motif: string}}
+ */
+export function argsRefusTracker({ scriptPath, entreprise = "", poste = "", raison = "" }) {
+  // Le pipe et les sauts de ligne casseraient la rangée du tableau markdown.
+  const propre = (v) => String(v ?? "").replace(/[|\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+  const societe = propre(entreprise);
+  const role = propre(poste);
+  const motif = propre(raison);
+
+  if (!societe) return { ok: false, motif: "fiche sans entreprise : rien à retrouver ni à créer dans le tracker" };
+
+  const args = [scriptPath, societe, "Discarded", "--note", `DISCARD: ${motif}`, "--json"];
+  if (role) args.push("--role", role);
+
+  // `--create` refuse un sélecteur purement numérique : un nombre nu désigne une
+  // ligne existante, pas une entreprise. Une raison de plus de ne pas l'ajouter
+  // à l'aveugle.
+  const creation = Boolean(role) && !/^\d+$/.test(societe);
+  if (creation) args.push("--create");
+
+  return { ok: true, args, creation };
+}
+
 /** `valider` et `refuser` closent la candidature ; les retouches font un aller-retour. */
 const TERMINALES = new Set(["valider", "refuser"]);
 

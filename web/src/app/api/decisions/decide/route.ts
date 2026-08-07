@@ -5,6 +5,7 @@ import { lireInbox } from "@/lib/cv-inbox";
 import { trackCompanyInPortals, type PortailTrackResult } from "@/lib/portals-track";
 import {
   ajouterAuJournal,
+  argsRefusTracker,
   dejaClose,
   estDecision,
   lireJournal,
@@ -44,7 +45,7 @@ function nettoieTexte(v: unknown): string {
     .slice(0, MAX_TEXTE);
 }
 
-type ResultatTracker = { applique: boolean; erreur: string | null };
+type ResultatTracker = { applique: boolean; erreur: string | null; creee?: boolean; num?: number | null };
 
 /**
  * Enregistre un refus dans le tracker via l'UNIQUE point d'écriture sanctionné
@@ -55,19 +56,23 @@ type ResultatTracker = { applique: boolean; erreur: string | null };
  * `analyze-patterns.mjs` agrège pour dire à Linéo quel motif de refus revient
  * le plus. C'est la seule raison pour laquelle on écrit dans le tracker ici.
  *
- * Une ligne absente n'est PAS une erreur bloquante : les fiches viennent de
- * n8n, et une offre jamais évaluée en local n'a pas de ligne. On le remonte,
- * la raison reste dans le journal, et le refus part quand même chez n8n.
+ * La ligne est CRÉÉE si elle n'existe pas (`--create`) : une candidature
+ * préparée par n8n n'en a pas, et sans ça la raison du refus mourait ici. Le
+ * choix des arguments vit dans `argsRefusTracker` (pur, testé) — cette fonction
+ * ne fait que lancer le script et rapporter.
+ *
+ * Un échec n'est PAS bloquant : la raison reste dans le journal, et le refus
+ * part quand même chez n8n. Mais il est remonté, jamais avalé.
  */
 function ecritRefusTracker(fiche: Fiche, raison: string): Promise<ResultatTracker> {
-  const entreprise = String(fiche.entreprise ?? "").trim();
-  if (!entreprise) {
-    return Promise.resolve({ applique: false, erreur: "fiche sans entreprise : rien à retrouver dans le tracker" });
-  }
-
-  const args = [rootScript("set-status"), entreprise, "Discarded", "--note", `DISCARD: ${raison}`, "--json"];
-  const poste = String(fiche.poste ?? "").trim();
-  if (poste) args.push("--role", poste);
+  const plan = argsRefusTracker({
+    scriptPath: rootScript("set-status"),
+    entreprise: String(fiche.entreprise ?? ""),
+    poste: String(fiche.poste ?? ""),
+    raison,
+  });
+  if (!plan.ok) return Promise.resolve({ applique: false, erreur: plan.motif, creee: false, num: null });
+  const { args, creation } = plan;
 
   return new Promise((resolve) => {
     let out = "";
@@ -76,7 +81,7 @@ function ecritRefusTracker(fiche: Fiche, raison: string): Promise<ResultatTracke
     try {
       child = spawn(process.execPath, args, { cwd: careerOpsRoot(), env: process.env });
     } catch (e) {
-      resolve({ applique: false, erreur: e instanceof Error ? e.message : "set-status.mjs n'a pas démarré" });
+      resolve({ applique: false, erreur: e instanceof Error ? e.message : "set-status.mjs n'a pas démarré", creee: false, num: null });
       return;
     }
     child.stdout.on("data", (d: Buffer) => {
@@ -94,12 +99,23 @@ function ecritRefusTracker(fiche: Fiche, raison: string): Promise<ResultatTracke
     }, 30_000);
     child.on("error", (e) => {
       clearTimeout(killer);
-      resolve({ applique: false, erreur: e.message });
+      resolve({ applique: false, erreur: e.message, creee: false, num: null });
     });
     child.on("close", (code) => {
       clearTimeout(killer);
       if (code === 0) {
-        resolve({ applique: true, erreur: null });
+        // `created` vient de set-status.mjs : on rapporte s'il a fallu créer la
+        // ligne ou seulement la mettre à jour, plutôt que de le déduire.
+        let creee = false;
+        let num: number | null = null;
+        try {
+          const j = JSON.parse(out) as { created?: boolean; num?: number };
+          creee = j?.created === true;
+          num = typeof j?.num === "number" ? j.num : null;
+        } catch {
+          /* sortie illisible : l'écriture a réussi, seul le détail manque */
+        }
+        resolve({ applique: true, erreur: null, creee, num });
         return;
       }
       // set-status --json met son erreur structurée sur stdout.
@@ -110,7 +126,12 @@ function ecritRefusTracker(fiche: Fiche, raison: string): Promise<ResultatTracke
       } catch {
         /* on garde le message brut */
       }
-      resolve({ applique: false, erreur: message });
+      // Sans rôle exploitable on n'a pas pu demander la création : le dire, sinon
+      // « aucune ligne » ressemble à une panne alors que c'est une fiche incomplète.
+      if (!creation) {
+        message += " — création impossible : la fiche n'a pas de poste exploitable";
+      }
+      resolve({ applique: false, erreur: message, creee: false, num: null });
     });
   });
 }
@@ -235,6 +256,10 @@ export async function POST(req: Request) {
     n8nError,
     trackerApplique: dec === "refuser" ? tracker.applique : undefined,
     trackerErreur: dec === "refuser" ? tracker.erreur : undefined,
+    // Ligne créée ou simplement mise à jour : sans ça, on ne peut plus savoir
+    // après coup si le motif de refus a bien atteint les statistiques.
+    trackerCreee: dec === "refuser" ? tracker.creee : undefined,
+    trackerNum: dec === "refuser" ? tracker.num : undefined,
     portailApplique: dec === "valider" ? portail?.applique : undefined,
     portailDeja: dec === "valider" ? portail?.deja : undefined,
     portailErreur: dec === "valider" ? portail?.erreur ?? undefined : undefined,

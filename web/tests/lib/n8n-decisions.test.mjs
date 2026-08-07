@@ -19,6 +19,7 @@ import {
   fichesEnAttente,
   lireFiches,
   lireJournal,
+  argsRefusTracker,
 } from "../../src/lib/n8n-decisions.mjs";
 
 const FICHE = {
@@ -205,4 +206,57 @@ test("les fiches les plus anciennes sortent en premier — elles bloquent n8n de
   } finally {
     rmSync(racine, { recursive: true, force: true });
   }
+});
+
+// ── argsRefusTracker ────────────────────────────────────────────────────────
+//
+// Le defaut que ces tests verrouillent est reel : les 2026-08-07, trois refus
+// ont ete enregistres avec leur raison dans le journal et en base, mais AUCUN
+// n'a atteint data/applications.md — donc ni analyze-patterns.mjs, ni /stats,
+// ni /analytics. set-status.mjs sortait sur « No tracker row with company
+// matching "Capgemini" (pass --create --role "..." to add it) », parce qu'une
+// candidature nee de n8n n'a pas de ligne au tracker.
+
+test("un refus cree la ligne quand elle n'existe pas : --create et --role sont passes", () => {
+  const r = argsRefusTracker({ scriptPath: "/app/set-status.mjs", entreprise: "Capgemini", poste: "Developpeur RPA", raison: "pas coherent" });
+  assert.equal(r.ok, true);
+  assert.equal(r.creation, true);
+  assert.ok(r.args.includes("--create"));
+  assert.deepEqual(r.args.slice(0, 3), ["/app/set-status.mjs", "Capgemini", "Discarded"]);
+  assert.equal(r.args[r.args.indexOf("--role") + 1], "Developpeur RPA");
+});
+
+test("la note garde le format DISCARD: que analyze-patterns.mjs agrege", () => {
+  const r = argsRefusTracker({ scriptPath: "s", entreprise: "Acme", poste: "Data Engineer", raison: "trop loin" });
+  assert.equal(r.args[r.args.indexOf("--note") + 1], "DISCARD: trop loin");
+  assert.ok(r.args.includes("--json"));
+});
+
+test("sans poste on NE cree RIEN : set-status --create refuse une ligne sans role", () => {
+  const r = argsRefusTracker({ scriptPath: "s", entreprise: "Acme", poste: "   ", raison: "non" });
+  assert.equal(r.ok, true);
+  assert.equal(r.creation, false);
+  assert.ok(!r.args.includes("--create"));
+  assert.ok(!r.args.includes("--role"));
+});
+
+test("une entreprise purement numerique ne declenche pas --create", () => {
+  // Un nombre nu designe une ligne existante, pas une entreprise : --create
+  // sortirait en erreur d'usage.
+  const r = argsRefusTracker({ scriptPath: "s", entreprise: "12345", poste: "Data Engineer", raison: "non" });
+  assert.equal(r.creation, false);
+  assert.ok(!r.args.includes("--create"));
+});
+
+test("sans entreprise on refuse, il n'y a rien a retrouver ni a creer", () => {
+  const r = argsRefusTracker({ scriptPath: "s", entreprise: "  ", poste: "Data Engineer", raison: "non" });
+  assert.equal(r.ok, false);
+  assert.match(r.motif, /entreprise/);
+});
+
+test("pipes et sauts de ligne sont neutralises : ils casseraient la rangee du tableau", () => {
+  const r = argsRefusTracker({ scriptPath: "s", entreprise: "Ac|me\nCorp", poste: "Dev | RPA", raison: "a\nb" });
+  assert.equal(r.args[1], "Ac me Corp");
+  assert.equal(r.args[r.args.indexOf("--role") + 1], "Dev RPA");
+  assert.equal(r.args[r.args.indexOf("--note") + 1], "DISCARD: a b");
 });
