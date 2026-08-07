@@ -59,28 +59,64 @@ export const ATS = {
     probeUrl: (slug, { eu = false } = {}) => `https://api.${eu ? 'eu.' : ''}lever.co/v0/postings/${slug}`,
     jobCount: (json) => (Array.isArray(json) ? json.length : null),
   },
+  // SmartRecruiters: public postings API, a plain GET keyed on the company slug —
+  // exactly the shape this prober needs. Added because Greenhouse/Ashby/Lever
+  // alone left real employers unresolvable (Lindy, Factorial and Vinted all came
+  // back 1/5), and SmartRecruiters covers a large slice of European companies.
+  // Payload is `{ content: [...], totalFound }`, not a bare array.
+  //
+  // Reached only through discoverAlternates: when a company's configured
+  // greenhouse/ashby/lever slug starts 404ing, we now also ask whether it moved
+  // to SmartRecruiters. The answer is printed as a suggestion for a human —
+  // nothing is written to portals.yml.
+  //
+  // `emptyProvesTenant: false` is what makes that safe. The other three ATSes
+  // answer 404 for an unknown slug, so a 200 with zero jobs genuinely means
+  // "this board exists, it is just hiring nothing right now". SmartRecruiters
+  // answers 200 + `{totalFound: 0, content: []}` for ANY string: `zzzzzzzzzz`
+  // and `ceci-nexiste-pas-du-tout-42` come back identical to a real dormant
+  // company (verified 2026-08-07). Without the flag, every failing slug would
+  // draw a confident "→ try smartrecruiters/<guess>" that is pure noise. Only a
+  // populated board is evidence here.
+  smartrecruiters: {
+    probeUrl: (slug) => `https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=1`,
+    jobCount: (json) =>
+      Array.isArray(json?.content)
+        ? (Number.isFinite(json?.totalFound) ? json.totalFound : json.content.length)
+        : null,
+    emptyProvesTenant: false,
+  },
 };
 
 // Recognize an ATS + slug from a careers_url OR an `api:` URL. The careers_url
 // patterns mirror the provider `resolveApiUrl` regexes; the api-URL patterns
 // cover entries that pin the resolved endpoint directly. First match wins.
 const ATS_URL_PATTERNS = [
-  {
-    ats: 'greenhouse',
-    re: /boards-api\.greenhouse\.io\/v1\/boards\/([^/?#]+)/,
-  },
-  { ats: 'greenhouse', re: /job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/ },
-  { ats: 'greenhouse', re: /boards\.greenhouse\.io\/([^/?#]+)/ },
-  { ats: 'ashby', re: /api\.ashbyhq\.com\/posting-api\/job-board\/([^/?#]+)/ },
-  { ats: 'ashby', re: /jobs\.ashbyhq\.com\/([^/?#]+)/ },
-  // Lever entries pin an exact `host` (checked via new URL(), like
-  // providers/lever.mjs's resolveApiUrl) instead of matching the hostname as a
-  // loose substring anywhere in the URL — otherwise a crafted
-  // https://evil.com/jobs.lever.co/x careers_url would falsely resolve as Lever.
+  // EVERY entry pins an exact `host`, checked via new URL() (like each provider's
+  // resolveApiUrl), rather than matching the hostname as a loose substring
+  // anywhere in the URL. Greenhouse and Ashby used to match loosely while only
+  // Lever was pinned, so `https://evil.example/boards.greenhouse.io/x` resolved
+  // as the Greenhouse board "x" — caught by tests/verify-portals-ats.test.mjs.
+  // That matters because careers_url is not always hand-written: entries are also
+  // created from offer URLs coming off France Travail via trackCompanyInPortals.
+  { ats: 'greenhouse', host: 'boards-api.greenhouse.io', re: /^\/v1\/boards\/([^/?#]+)/ },
+  { ats: 'greenhouse', host: 'job-boards.greenhouse.io', re: /^\/([^/?#]+)/ },
+  { ats: 'greenhouse', host: 'job-boards.eu.greenhouse.io', re: /^\/([^/?#]+)/ },
+  { ats: 'greenhouse', host: 'boards.greenhouse.io', re: /^\/([^/?#]+)/ },
+  { ats: 'ashby', host: 'api.ashbyhq.com', re: /^\/posting-api\/job-board\/([^/?#]+)/ },
+  { ats: 'ashby', host: 'jobs.ashbyhq.com', re: /^\/([^/?#]+)/ },
   { ats: 'lever', host: 'api.eu.lever.co', re: /^\/v0\/postings\/([^/?#]+)/, eu: true },
   { ats: 'lever', host: 'jobs.eu.lever.co', re: /^\/([^/?#]+)/, eu: true },
   { ats: 'lever', host: 'api.lever.co', re: /^\/v0\/postings\/([^/?#]+)/ },
   { ats: 'lever', host: 'jobs.lever.co', re: /^\/([^/?#]+)/ },
+  // DELIBERATELY NOT HERE: smartrecruiters, workday, and the other 60-odd
+  // platforms under providers/. Matching here is TIER 1, which short-circuits the
+  // provider layer below (see verifyCompanies). A SmartRecruiters careers_url
+  // must keep falling through to providers/smartrecruiters.mjs — that is the code
+  // the real scanner runs, so it is the only thing worth health-checking. Adding
+  // a pattern here would make this script report "live" through a path production
+  // never takes. Tier 1 exists for the three ATSes whose slug can be probed in a
+  // single GET, nothing more.
 ];
 
 /**
@@ -88,8 +124,10 @@ const ATS_URL_PATTERNS = [
  *
  * @param {string} url - A `careers_url` or `api` value from portals.yml.
  * @returns {{ats: string, slug: string, eu?: boolean}|null} Match, or null for
- *   non-ATS URLs (branded careers pages, Workday, job boards, etc.) which this
- *   tool skips. `eu` is set for Lever's EU data-residency instance.
+ *   every other URL (branded careers pages, Workday, SmartRecruiters, job
+ *   boards...). Null does NOT mean "skipped": it means the entry falls through to
+ *   the provider layer in verifyCompanies, which covers ~68 platforms. `eu` is
+ *   set for Lever's EU data-residency instance.
  */
 export function parseAtsSlug(url) {
   const text = String(url || '');
@@ -246,7 +284,10 @@ async function discoverAlternates(name, { fetchJson }) {
       for (const eu of euVariants) {
         const r = await probeSlug(ats, slug, { fetchJson, eu });
         if (r.status === 'live') return r;
-        if (r.status === 'empty' && !bestEmpty) bestEmpty = r;
+        // An empty board is only a fallback for ATSes where "empty" implies the
+        // tenant exists (see ATS.smartrecruiters.emptyProvesTenant).
+        if (r.status === 'empty' && !bestEmpty && ATS[ats]?.emptyProvesTenant !== false)
+          bestEmpty = r;
       }
     }
   }
