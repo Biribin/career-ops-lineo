@@ -354,6 +354,19 @@ try {
     'utf-8'
   );
 
+  // Le defaut de `run()` (30 s) vise des scripts courts ; cette liste contient
+  // aussi des SUITES entieres. `tracker-writer-lock-tests.mjs` met ~39 s a lui
+  // seul sur Windows — il teste des expirations de verrou, donc il attend
+  // vraiment — et depassait donc le budget quoi qu'il arrive. Le symptome etait
+  // trompeur : « crashed (exit null, signal SIGTERM) », qui ressemble a une
+  // regression alors que la suite passe verte en isolation. D'autres (columns,
+  // set-status, paste-reply) ne debordaient que sous charge, ce qui les rendait
+  // intermittentes et donc faciles a mettre sur le compte du dernier changement.
+  //
+  // Le delai reste un garde-fou contre un blocage, pas une assertion : l'elever
+  // n'affaiblit aucun test. Reglable pour une machine lente ou un CI charge.
+  const SUITE_TIMEOUT_MS = Number(process.env.CAREER_OPS_SUITE_TIMEOUT_MS) || 180000;
+
   for (const { name, allowFail } of scripts) {
     const parts = name.split(' ');
     const scriptFile = parts[0];
@@ -361,6 +374,7 @@ try {
     const result = run(NODE, [join(scriptTmp, scriptFile), ...args], {
       cwd: scriptTmp,
       stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: SUITE_TIMEOUT_MS,
     });
     if (result !== null) {
       pass(`${name} runs OK`);
@@ -10068,12 +10082,20 @@ function makeTierFixture(profileYml) {
   return { tmp, batchDir, fakeBin };
 }
 
+// batch-runner.sh est un script bash lance via Git Bash : sous Windows, le seul
+// demarrage du shell plus le faux `claude` mange une part notable du budget, et
+// sous charge les 30 s par defaut de `run()` sont depassees. Le symptome est
+// muet et trompeur — `argv=""` et `out=""`, donc le test conclut « n'a pas
+// route vers le bon modele » alors que le script n'a simplement jamais fini.
+// Le delai reste un garde-fou contre un blocage, pas une assertion.
+const BATCH_TIMEOUT_MS = Number(process.env.CAREER_OPS_SUITE_TIMEOUT_MS) || 180000;
+
 // economy tier
 try {
   const { tmp, batchDir, fakeBin } = makeTierFixture('spend_tier: economy\n');
   const argFile = join(tmp, 'claude-argv.txt');
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
-  const out = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
+  const out = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'], timeout: BATCH_TIMEOUT_MS }) || '';
   const argv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
   if (argv.includes('--model') && argv.includes('claude-haiku-4-5') && out.includes('spend_tier=economy')) {
     pass('economy spend_tier resolves to claude-haiku-4-5');
@@ -10088,7 +10110,7 @@ try {
   const { tmp, batchDir, fakeBin } = makeTierFixture('spend_tier: premium\n');
   const argFile = join(tmp, 'claude-argv.txt');
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
-  const premiumOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
+  const premiumOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'], timeout: BATCH_TIMEOUT_MS }) || '';
   const premiumArgv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
   if (premiumArgv.includes('--model') && premiumArgv.includes('claude-opus-5') && premiumOut.includes('spend_tier=premium')) {
     pass('premium spend_tier resolves to claude-opus-5');
@@ -10103,7 +10125,7 @@ try {
   const { tmp, batchDir, fakeBin } = makeTierFixture('spend_tier: premium\n');
   const argFile = join(tmp, 'claude-argv.txt');
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
-  const overrideOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--model', 'claude-sonnet-5'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
+  const overrideOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--model', 'claude-sonnet-5'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'], timeout: BATCH_TIMEOUT_MS }) || '';
   const overrideArgv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
   if (overrideArgv.includes('--model') && overrideArgv.includes('claude-sonnet-5') && !overrideArgv.includes('claude-opus-5') && overrideOut.includes('explicit --model override')) {
     pass('--model override takes precedence over spend_tier');
@@ -10118,7 +10140,7 @@ try {
   const { tmp, batchDir, fakeBin } = makeTierFixture('# no spend_tier key\nname: test\n');
   const argFile = join(tmp, 'claude-argv.txt');
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
-  const standardDefaultOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
+  const standardDefaultOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'], timeout: BATCH_TIMEOUT_MS }) || '';
   const standardDefaultArgv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
   if (standardDefaultArgv.includes('--model') && standardDefaultArgv.includes('claude-sonnet-5') && standardDefaultOut.includes('spend_tier=standard')) {
     pass('missing spend_tier key defaults to standard tier (claude-sonnet-5)');
@@ -10133,7 +10155,7 @@ try {
   const { tmp, batchDir, fakeBin } = makeTierFixture('spend_tier: turbo\n');
   const argFile = join(tmp, 'claude-argv.txt');
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
-  const invalidTierOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
+  const invalidTierOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'], timeout: BATCH_TIMEOUT_MS }) || '';
   const invalidTierArgv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
   if (invalidTierArgv.includes('--model') && invalidTierArgv.includes('claude-sonnet-5') && invalidTierOut.includes('spend_tier=standard')) {
     pass('invalid spend_tier value falls back to standard tier (claude-sonnet-5)');
