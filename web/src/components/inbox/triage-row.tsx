@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, Check, Copy, ExternalLink, Loader2, MessageSquarePlus, X } from "lucide-react";
+import { Bookmark, BookmarkCheck, Check, Copy, ExternalLink, Loader2, MessageSquarePlus, ScanSearch, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
@@ -57,6 +57,47 @@ export function TriageRow({
   const [reply, setReply] = useState<string | null>(null);
   const [gen, setGen] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // ── Évaluation express : est-ce que ça vaut le coup d'aller plus loin ? ─────
+  //
+  // Le classement de la file (scan-rank.mjs) ne regarde que l'intitulé, le lieu
+  // et la date : il ne lit JAMAIS le corps de l'annonce, et il traite « junior »
+  // et « senior » comme des mots vides. D'où le piège du 2026-08-07 — une offre
+  // à 83/100 qui exigeait « 3 à 5 ans d'expérience » dans son texte. Aucun
+  // réglage de mots-clés ne l'attrape : il faut lire l'annonce, c'est ce que
+  // fait /api/pipeline/evaluate.
+  //
+  // Ce n'est PAS l'évaluation complète (mode oferta, note sur 5, rapport,
+  // ligne de tracker) : c'est un filtre d'entrée, et le badge à droite reste la
+  // vraie note quand elle existe.
+  type Fit = {
+    verdict?: string;
+    resume?: string;
+    bloquants?: { quoi: string; citation: string }[];
+    bloquantsNonVerifies?: string[];
+    atouts?: string[];
+    ecarts?: string[];
+    error?: string;
+  };
+  const [fit, setFit] = useState<Fit | null>(null);
+  const [fitEnCours, setFitEnCours] = useState(false);
+
+  async function evaluerOffre() {
+    setFitEnCours(true);
+    setFit(null);
+    try {
+      const res = await fetch("/api/pipeline/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: job.url }),
+      });
+      setFit((await res.json()) as Fit);
+    } catch (e) {
+      setFit({ error: e instanceof Error ? e.message : "évaluation injoignable" });
+    } finally {
+      setFitEnCours(false);
+    }
+  }
 
   async function generateReply() {
     setGen(true);
@@ -170,6 +211,22 @@ export function TriageRow({
             </button>
           )}
 
+          {/* Évaluer — lit l'annonce, cherche les exigences bloquantes.
+              Masqué sur les posts du forum n8n : ils n'ont pas d'annonce
+              structurée, et « Réponse » y est déjà le bon geste. */}
+          {!isN8n && !evaluated && (
+            <button
+              type="button"
+              onClick={evaluerOffre}
+              disabled={fitEnCours}
+              title="Évaluer — lit l'annonce et signale les exigences bloquantes"
+              className="inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-hover hover:text-brand disabled:opacity-60 max-sm:min-h-[44px]"
+            >
+              {fitEnCours ? <Loader2 className="size-4 animate-spin" /> : <ScanSearch className="size-4" />}
+              <span className="max-sm:hidden">{fitEnCours ? "…" : "Évaluer"}</span>
+            </button>
+          )}
+
           {/* EVALUADA state OU actions save/skip */}
           {evaluated ? (
             <Link href={`/jobs/${scored!.jobId}`} className="flex items-center gap-1.5 text-xs">
@@ -209,6 +266,71 @@ export function TriageRow({
           )}
         </div>
       </div>
+
+      {/* Panneau d'évaluation. Les bloquants sont affichés AVEC leur citation :
+          c'est la citation qui distingue une exigence réelle d'une impression,
+          et /api/pipeline/evaluate refuse de garder un bloquant qu'il n'a pas
+          pu retrouver mot pour mot dans l'annonce. */}
+      {fit && (
+        <div className="ml-7 rounded-lg border border-border bg-surface/40 p-3 sm:ml-9">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-faint">
+              {fit.error
+                ? "Évaluation impossible"
+                : fit.verdict === "hors_cible"
+                  ? "Hors cible"
+                  : fit.verdict === "a_postuler"
+                    ? "À postuler"
+                    : "À regarder"}
+            </span>
+            <button
+              type="button"
+              onClick={() => setFit(null)}
+              title="Fermer"
+              className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+
+          {fit.error ? (
+            <p className="text-xs text-muted">{fit.error}</p>
+          ) : (
+            <div className="space-y-2 text-xs">
+              {fit.resume && <p className="text-foreground">{fit.resume}</p>}
+
+              {!!fit.bloquants?.length && (
+                <ul className="space-y-1">
+                  {fit.bloquants.map((b, i) => (
+                    <li key={i} className="text-foreground">
+                      <span className="font-medium">Bloquant : {b.quoi}</span>
+                      <br />
+                      <span className="text-muted">« {b.citation} »</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {!!fit.ecarts?.length && (
+                <p className="text-muted">Écarts : {fit.ecarts.join(" · ")}</p>
+              )}
+              {!!fit.atouts?.length && (
+                <p className="text-muted">Atouts : {fit.atouts.join(" · ")}</p>
+              )}
+
+              {/* Ce que le modèle a avancé sans pouvoir le citer. Montré, mais
+                  jamais compté comme bloquant : une offre écartée à tort coûte
+                  plus cher qu'une offre évaluée pour rien. */}
+              {!!fit.bloquantsNonVerifies?.length && (
+                <p className="text-faint">
+                  Avancé sans citation dans l&rsquo;annonce, donc non retenu :{" "}
+                  {fit.bloquantsNonVerifies.join(" · ")}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Panneau de la réponse générée */}
       {reply && (
