@@ -102,10 +102,13 @@ export function FilterBuilder({
   filters,
   onChange,
   seededFrom = [],
+  onReamorcer,
 }: {
   filters: ExploreFilters;
   onChange: (f: ExploreFilters) => void;
   seededFrom?: string[];
+  /** Rejette les critères conservés et revient à la graine portals.yml. */
+  onReamorcer?: () => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
   const set = (patch: Partial<ExploreFilters>) => onChange({ ...filters, ...patch });
@@ -123,7 +126,21 @@ export function FilterBuilder({
         <Label hint={filters.positive.length === 0 ? "vide = toutes les offres récentes" : undefined}>Postes à trouver</Label>
         <KeywordField values={filters.positive} tone="inc" placeholder="plateforme IA, infrastructure ML, ingénieur expert…" onChange={(v) => set({ positive: v })} />
         {seededFrom.length > 0 && filters.positive.length > 0 && (
-          <p className="mt-1 text-[11px] text-faint">Amorcé depuis votre {seededFrom.join(" + ")} — modifiez librement.</p>
+          <p className="mt-1 text-[11px] text-faint">
+            Amorcé depuis votre {seededFrom.join(" + ")} — modifiez librement, vos réglages sont conservés.
+            {onReamorcer && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  onClick={onReamorcer}
+                  className="underline underline-offset-2 transition-colors hover:text-foreground"
+                >
+                  Réamorcer
+                </button>
+              </>
+            )}
+          </p>
         )}
       </div>
 

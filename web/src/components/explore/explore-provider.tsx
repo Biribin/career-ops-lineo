@@ -16,6 +16,7 @@ import {
   type ScanEvent,
 } from "@/lib/explore";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
+import { normaliseFiltresSauves } from "@/lib/explore-filtres.mjs";
 
 export type Phase =
   | "idle"
@@ -84,6 +85,46 @@ export function useExplore(): ExploreCtx {
 // tokens). Persist the SETTLED result set per-tab so a reload or a mode toggle never
 // throws the work away (disc#5 — "came back to explore, work is lost").
 const RESULTS_KEY = "career-ops:explore-results";
+const FILTRES_KEY = "career-ops:explore-filters";
+
+/**
+ * Les critères de recherche, conservés d'une visite à l'autre.
+ *
+ * localStorage et pas sessionStorage (contrairement aux RÉSULTATS, volontairement
+ * par onglet) : un profil de recherche est un réglage durable, pas l'état d'un
+ * onglet. Les résultats se refont en un clic ; retaper vingt mots-clés, non.
+ */
+export function sauveFiltres(f: ExploreFilters): void {
+  try {
+    localStorage.setItem(FILTRES_KEY, JSON.stringify(f));
+  } catch {
+    /* quota plein ou stockage indisponible — on n'empêche pas la recherche pour ça */
+  }
+}
+
+/**
+ * Relit les critères conservés. Rend `null` si rien n'est stocké ou si le
+ * contenu est inexploitable — on retombe alors sur la graine `portals.yml`.
+ * La validation elle-même est dans `explore-filtres.mjs`, pure et testée.
+ */
+export function litFiltresSauves(graine: ExploreFilters): ExploreFilters | null {
+  try {
+    const s = localStorage.getItem(FILTRES_KEY);
+    if (!s) return null;
+    return normaliseFiltresSauves(JSON.parse(s), graine) as ExploreFilters | null;
+  } catch {
+    return null;
+  }
+}
+
+/** Oublie les critères conservés — le bouton « réamorcer depuis portals.yml ». */
+export function oublieFiltresSauves(): void {
+  try {
+    localStorage.removeItem(FILTRES_KEY);
+  } catch {
+    /* rien à faire */
+  }
+}
 type ResultSnapshot = {
   v: number;
   mode: ExploreMode;
@@ -137,6 +178,12 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     touched.current = true;
     filtersRef.current = f;
     setFiltersState(f);
+    // Un critère saisi doit survivre au rechargement. Il ne survivait avant que
+    // si on lançait une découverte (elle écrit les filtres dans l'URL) : ajouter
+    // « sales » aux exclusions puis recharger le perdait en silence.
+    // Ici, et pas dans le composant : c'est le seul passage obligé, l'assistant
+    // aussi modifie les filtres (applyPatch).
+    sauveFiltres(f);
   }, []);
   const initFilters = useCallback((f: ExploreFilters) => {
     if (touched.current) return;

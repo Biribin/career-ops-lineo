@@ -13,7 +13,7 @@ import { AiHuntView } from "./ai-hunt-view";
 import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
-import { useExplore } from "./explore-provider";
+import { useExplore, litFiltresSauves, oublieFiltresSauves } from "./explore-provider";
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const CLI_NAMES: Record<string, string> = {
@@ -43,6 +43,12 @@ export function ExplorerView({
       ? `${companiesScanned.toLocaleString("fr-FR")}${companiesAvailable > companiesScanned ? ` entreprise${companiesScanned === 1 ? "" : "s"} sur ${companiesAvailable.toLocaleString("fr-FR")}` : ` entreprise${companiesScanned === 1 ? "" : "s"}`} scannée${companiesScanned === 1 ? "" : "s"}${partial ? " · certaines sources étaient injoignables" : ""}.`
       : undefined;
   const inited = useRef(false);
+  // Une fois les critères conservés, la graine portals.yml devient inatteignable
+  // sans vider le stockage à la main. D'où cette porte de sortie.
+  const reamorcer = () => {
+    oublieFiltresSauves();
+    setFilters(seed.filters);
+  };
   const [refineOpen, setRefineOpen] = useState(false);
   const [cli, setCli] = useState<{ id: string | null; name?: string }>({ id: null });
   const [firstRun, setFirstRun] = useState(false);
@@ -67,7 +73,13 @@ export function ExplorerView({
       setMode("ai");
       setAiIntent(ai);
     } else {
-      initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
+      // Précédence : l'URL d'abord (un lien partagé ou une recherche relancée est
+      // une intention explicite), puis les critères conservés du dernier passage,
+      // et seulement à défaut la graine portals.yml. Sans le cran du milieu, tout
+      // ce qui était saisi à la main disparaissait au rechargement.
+      initFilters(
+        sp.toString() ? paramsToFilters(sp) : (litFiltresSauves(seed.filters) ?? seed.filters),
+      );
       // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
       // banner (the "matches found from your CV, free" reveal).
       if (sp.get("run") === "1") {
@@ -164,14 +176,24 @@ export function ExplorerView({
               </button>
               {refineOpen && (
                 <div className="space-y-4 border-t border-border p-4">
-                  <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
+                  <FilterBuilder
+                    filters={filters}
+                    onChange={setFilters}
+                    seededFrom={seed.seededFrom}
+                    onReamorcer={reamorcer}
+                  />
                   <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Relancer (gratuit)" />
                 </div>
               )}
             </div>
           ) : (
             <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
-              <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
+              <FilterBuilder
+                    filters={filters}
+                    onChange={setFilters}
+                    seededFrom={seed.seededFrom}
+                    onReamorcer={reamorcer}
+                  />
               <div className="mt-5">
                 <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Découvrir (gratuit)" />
               </div>
