@@ -40,6 +40,7 @@ import { dirname, resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import yaml from 'js-yaml';
 import { resolveColumns } from './tracker-parse.mjs';
+import { purgeFollowupsForApp } from './followup-seed.mjs';
 import {
   canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,
 } from './tracker-utils.mjs';
@@ -508,6 +509,12 @@ async function deleteApp(args) {
     console.error(`Error: ${MD_PATH} not found — nothing to delete.`);
     process.exit(1);
   }
+  // follow-ups.md est le FRÈRE du tracker, comme status-log.tsv l'est pour
+  // set-status.mjs : une redirection CAREER_OPS_TRACKER (tests, autre agencement)
+  // emmène donc le fichier de relances avec elle, au lieu de laisser une
+  // suppression en bac à sable toucher le vrai fichier de l'utilisateur.
+  const followupsPath = process.env.CAREER_OPS_FOLLOWUPS || join(dirname(MD_PATH), 'follow-ups.md');
+
   if (args.includes('--dry-run')) {
     const { removed, removedCount, report } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
     if (!removed) {
@@ -516,6 +523,10 @@ async function deleteApp(args) {
     }
     console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
     if (report) console.error(`(report file would be orphaned: ${report})`);
+    const apercu = await purgeFollowupsForApp(parseInt(num, 10), { followupsPath, dryRun: true });
+    if (apercu.purged) {
+      console.error(`(would also drop ${apercu.pins} pin(s) and ${apercu.rows} follow-up row(s) from ${apercu.followups})`);
+    }
     return;
   }
 
@@ -535,6 +546,25 @@ async function deleteApp(args) {
   }
 
   const { removedCount, report } = removal;
+
+  // L'état de relance de la ligne supprimée doit partir AVEC elle. Sinon le
+  // numéro libéré est réattribué par `set-status --create` (max + 1) et la
+  // candidature suivante hérite de la date de relance et du compteur de la
+  // morte : `isAlreadySeeded` répond oui, et la relance part au mauvais moment
+  // sans que rien n'ait l'air cassé. Constaté en production le 2026-08-07.
+  //
+  // Non bloquant : la ligne est DÉJÀ supprimée à ce stade, et perdre la
+  // suppression pour un fichier de relances illisible serait le mauvais sens
+  // d'échec. On le dit, on ne le tait pas.
+  try {
+    const purge = await purgeFollowupsForApp(parseInt(num, 10), { followupsPath });
+    if (purge.purged) {
+      console.error(`Also removed ${purge.pins} pin(s) and ${purge.rows} follow-up row(s) for #${num} from ${purge.followups}.`);
+    }
+  } catch (e) {
+    console.error(`⚠ follow-up state for #${num} could NOT be purged (${e.message}). Remove it by hand in ${followupsPath}, or a future application reusing #${num} will inherit its schedule.`);
+  }
+
   // Rebuild the derived SQLite index from the now-updated markdown.
   try {
     const states = loadStates();

@@ -23,6 +23,21 @@ function parseOrphan(stderr: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+/**
+ * Ce que `tracker.mjs delete` a retiré (ou retirerait) de data/follow-ups.md.
+ *
+ * Remonté pour que la confirmation de l'interface dise la vérité : la
+ * suppression emporte AUSSI le planning de relance de la ligne, et c'est
+ * irréversible comme le reste.
+ *
+ *   dry-run : "(would also drop 2 pin(s) and 1 follow-up row(s) from <path>)"
+ *   réel    : "Also removed 2 pin(s) and 1 follow-up row(s) for #5 from <path>."
+ */
+function parseRelances(stderr: string): { pins: number; rows: number } | null {
+  const m = stderr.match(/(\d+)\s+pin\(s\)\s+and\s+(\d+)\s+follow-up row\(s\)/i);
+  return m ? { pins: Number(m[1]), rows: Number(m[2]) } : null;
+}
+
 export async function POST(req: Request) {
   let body: { n?: string | number; dryRun?: boolean };
   try {
@@ -98,7 +113,12 @@ export async function POST(req: Request) {
         { status: notFound ? 404 : 400 },
       );
     }
-    return Response.json({ ok: true, dryRun, orphanReport: parseOrphan(result.err) });
+    return Response.json({
+      ok: true,
+      dryRun,
+      orphanReport: parseOrphan(result.err),
+      relances: parseRelances(result.err),
+    });
   } finally {
     if (!dryRun) deleting = false;
   }

@@ -490,5 +490,155 @@ function cleanup(sandbox) {
   cleanup(sb);
 }
 
+// ── purgeFollowupsForApp : l'état de relance meurt avec sa ligne ────────────
+//
+// BUG CONSTATÉ EN PRODUCTION LE 2026-08-07. `tracker.mjs delete --num N`
+// supprimait la ligne mais laissait son pin. Comme `set-status --create`
+// renumérote en max+1, le numéro libéré revient à la candidature suivante, et
+// `isAlreadySeeded` répond alors « oui » à cause du pin du mort : la nouvelle
+// hérite de la date de relance de l'ancienne. Rien n'a l'air cassé, la relance
+// part juste au mauvais moment.
+{
+  const { purgeFollowupsForApp } = await import(pathToFileURL(join(ROOT, 'followup-seed.mjs')).href);
+
+  // 1. Pins ET lignes de table de l'application visée s'en vont ; celles des
+  //    autres restent. Une ligne de table compte autant qu'un pin : orpheline,
+  //    elle ferait croire que la NOUVELLE candidature a déjà été relancée.
+  {
+    const sb = makeSandbox();
+    try {
+      writeFileSync(sb.followups, [
+        '# Follow-ups',
+        '',
+        '| num | appNum | date | company | role | channel | contact | notes |',
+        '|---|---|---|---|---|---|---|---|',
+        '| 1 | 2 | 2026-08-05 | Globex | Ops | email | rh@globex.fr | relance 1 |',
+        '| 2 | 7 | 2026-08-06 | Acme | Dev | email | rh@acme.fr | relance 1 |',
+        '- next #2 2026-08-12 (set 2026-08-05)',
+        '- next #7 2026-08-13 (set 2026-08-06)',
+        '',
+      ].join('\n'));
+
+      const r = await purgeFollowupsForApp(2, { followupsPath: sb.followups });
+      const apres = readFileSync(sb.followups, 'utf-8');
+      const ok = r.purged === true && r.pins === 1 && r.rows === 1
+        && !apres.includes('next #2') && !apres.includes('Globex')
+        && apres.includes('next #7') && apres.includes('Acme')
+        && apres.includes('| num | appNum |');   // l'en-tête survit
+      if (ok) pass('purge: le pin ET la ligne de table partent, les autres applications sont intactes');
+      else fail(`purge nominale — ${JSON.stringify(r)}\n${apres}`);
+    } finally { cleanup(sb); }
+  }
+
+  // 2. LA régression : un numéro réattribué ne doit plus hériter d'un planning.
+  {
+    const sb = makeSandbox();
+    try {
+      writeFileSync(sb.followups, [
+        '# Follow-ups', '',
+        '- next #2 2026-08-12 (set 2026-08-05)', '',
+      ].join('\n'));
+      writeTracker(sb, [trackerRow(2, '2026-08-07', 'Initech', 'Data Engineer', '—', 'Applied', 'Applied 2026-08-07')]);
+
+      // Avant la purge : la nouvelle #2 hérite de la date de la morte.
+      const avant = run(['2', '--json'], sb);
+      const jAvant = JSON.parse(avant.stdout);
+
+      await purgeFollowupsForApp(2, { followupsPath: sb.followups });
+
+      const apres = run(['2', '--json'], sb);
+      const jApres = JSON.parse(apres.stdout);
+
+      const ok = jAvant.seeded === false && jAvant.reason === 'already-seeded'
+        && jApres.seeded === true && jApres.nextDate === '2026-08-14';
+      if (ok) pass('purge: apres elle, un numero reattribue recalcule SA date (2026-08-14, plus 2026-08-12)');
+      else fail(`regression du numero reattribue — avant=${avant.stdout} apres=${apres.stdout}`);
+    } finally { cleanup(sb); }
+  }
+
+  // 3. Rien à purger, et fichier absent : deux non-évènements, pas des pannes.
+  {
+    const sb = makeSandbox();
+    try {
+      const sansFichier = await purgeFollowupsForApp(3, { followupsPath: sb.followups });
+      writeFileSync(sb.followups, '# Follow-ups\n\n- next #9 2026-08-12 (set 2026-08-05)\n');
+      const rienAFaire = await purgeFollowupsForApp(3, { followupsPath: sb.followups });
+      const intact = readFileSync(sb.followups, 'utf-8').includes('next #9');
+      const ok = sansFichier.purged === false && sansFichier.reason === 'no-followups-file'
+        && rienAFaire.purged === false && rienAFaire.reason === 'nothing-to-purge' && intact;
+      if (ok) pass('purge: fichier absent ou rien a retirer -> non-evenement, aucune ecriture');
+      else fail(`cas vides — ${JSON.stringify(sansFichier)} / ${JSON.stringify(rienAFaire)}`);
+    } finally { cleanup(sb); }
+  }
+
+  // 4. Un préfixe ne doit pas emporter les voisins : #1 ne touche pas #12.
+  {
+    const sb = makeSandbox();
+    try {
+      writeFileSync(sb.followups, [
+        '# Follow-ups', '',
+        '- next #1 2026-08-10 (set 2026-08-03)',
+        '- next #12 2026-08-11 (set 2026-08-04)',
+        '',
+      ].join('\n'));
+      const r = await purgeFollowupsForApp(1, { followupsPath: sb.followups });
+      const apres = readFileSync(sb.followups, 'utf-8');
+      const ok = r.pins === 1 && !apres.includes('next #1 ') && apres.includes('next #12');
+      if (ok) pass('purge: #1 ne fait pas disparaitre #12 (pas de correspondance par prefixe)');
+      else fail(`prefixe — ${JSON.stringify(r)}\n${apres}`);
+    } finally { cleanup(sb); }
+  }
+
+  // 5. --dry-run annonce sans écrire.
+  {
+    const sb = makeSandbox();
+    try {
+      const contenu = '# Follow-ups\n\n- next #4 2026-08-12 (set 2026-08-05)\n';
+      writeFileSync(sb.followups, contenu);
+      const r = await purgeFollowupsForApp(4, { followupsPath: sb.followups, dryRun: true });
+      const ok = r.purged === true && r.pins === 1 && r.dryRun === true
+        && readFileSync(sb.followups, 'utf-8') === contenu;
+      if (ok) pass('purge: --dry-run compte ce qui partirait et n ecrit rien');
+      else fail(`dry-run — ${JSON.stringify(r)}`);
+    } finally { cleanup(sb); }
+  }
+
+  // 6. tracker.mjs delete l'appelle vraiment : c'est le point du correctif.
+  //    Sans CAREER_OPS_FOLLOWUPS, le chemin se résout en FRÈRE du tracker —
+  //    c'est ce qui garde une suppression en bac à sable loin du vrai fichier.
+  {
+    const sb = makeSandbox();
+    try {
+      writeTracker(sb, [
+        trackerRow(1, '2026-08-01', 'Acme', 'Dev', '4.0/5', 'Applied', 'Applied 2026-08-01'),
+        trackerRow(2, '2026-08-02', 'Globex', 'Ops', '3.5/5', 'Applied', 'Applied 2026-08-02'),
+      ]);
+      writeFileSync(sb.followups, [
+        '# Follow-ups', '',
+        '- next #1 2026-08-08 (set 2026-08-01)',
+        '- next #2 2026-08-12 (set 2026-08-05)',
+        '',
+      ].join('\n'));
+
+      let code = 0;
+      let stderr = '';
+      try {
+        execFileSync(process.execPath, [join(ROOT, 'tracker.mjs'), 'delete', '--num', '2'], {
+          cwd: ROOT,
+          env: { ...process.env, CAREER_OPS_TRACKER: sb.tracker },  // pas de CAREER_OPS_FOLLOWUPS
+          encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch (e) { code = e.status ?? 1; stderr = e.stderr || ''; }
+
+      const suivis = readFileSync(sb.followups, 'utf-8');
+      const tracker = readFileSync(sb.tracker, 'utf-8');
+      const ok = code === 0 && !suivis.includes('next #2') && suivis.includes('next #1')
+        && !tracker.includes('Globex') && tracker.includes('Acme');
+      if (ok) pass('tracker delete purge l etat de relance, chemin resolu en frere du tracker');
+      else fail(`tracker delete — code=${code}\n${stderr}\n${suivis}`);
+    } finally { cleanup(sb); }
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

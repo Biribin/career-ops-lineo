@@ -470,6 +470,110 @@ export async function seedFollowup(appNum, options = {}) {
   }
 }
 
+// --- Core: purge one application's follow-up state --------------------------
+
+/**
+ * Remove every trace of ONE application from data/follow-ups.md: its pin
+ * directives AND its follow-up table rows.
+ *
+ * WHY THIS EXISTS (bug observed in production 2026-08-07)
+ * ------------------------------------------------------
+ * `tracker.mjs delete --num N` removed the application row but left its
+ * follow-up state behind. Two things then conspire:
+ *   1. `set-status --create` numbers a new row `max(num) + 1`, so a deleted
+ *      trailing number is handed straight back to the next application;
+ *   2. `isAlreadySeeded()` answers "yes" for that number, because the old pin
+ *      (or table row) is still there.
+ * The new application therefore inherits the DEAD one's next-follow-up date and
+ * follow-up count, and `followup-seed` reports `already-seeded` instead of
+ * computing its own. The follow-up then fires at the wrong time — silently,
+ * because nothing about it looks broken.
+ *
+ * Both kinds of line go, not just pins: a table row means "a follow-up was
+ * sent", and an orphan one makes the NEW application look like it has already
+ * been chased once (`followupCount`), which is the same class of error.
+ *
+ * Called from `tracker.mjs delete`, inside its own lock, so follow-ups.md keeps
+ * exactly one writer — this file.
+ *
+ * @param {number} appNum - Tracker row number whose follow-up state must go.
+ * @param {object} [options]
+ * @param {string} [options.followupsPath] - Overrides env/default resolution.
+ * @param {boolean} [options.dryRun] - Report what would go, write nothing.
+ * @param {string} [options.lockDir]
+ * @param {number} [options.lockTimeoutMs]
+ * @param {number} [options.lockRetryMs]
+ * @param {number} [options.lockStaleMs]
+ * @returns {Promise<{purged: boolean, appNum: number, pins: number, rows: number,
+ *                    followups: string, reason?: string, dryRun?: boolean}>}
+ */
+export async function purgeFollowupsForApp(appNum, options = {}) {
+  const num = Number(appNum);
+  if (!Number.isInteger(num) || num < 0) {
+    throw new SeedError('USAGE', `purgeFollowupsForApp expects a positive integer appNum, got ${appNum}`);
+  }
+  const followupsPath = resolveFollowupsPath(options.followupsPath);
+
+  /** Same shape as formatPinLine, and the same reading as followup-cadence's OVERRIDE_RE. */
+  const pinRe = new RegExp(`^-\\s+next\\s+#${num}\\s`, 'i');
+
+  /** A table row's appNum is cell 2 — see hasFollowupTableRow. */
+  const estLigneDeCetteApp = (line) => {
+    if (!line.startsWith('|')) return false;
+    const parts = line.split('|').map(s => s.trim());
+    if (parts.length < 8) return false;
+    const rowAppNum = parseInt(parts[2], 10);
+    return !Number.isNaN(rowAppNum) && rowAppNum === num;
+  };
+
+  const compte = (content) => {
+    let pins = 0;
+    let rows = 0;
+    const gardees = [];
+    for (const line of content.split('\n')) {
+      if (pinRe.test(line)) { pins++; continue; }
+      if (estLigneDeCetteApp(line)) { rows++; continue; }
+      gardees.push(line);
+    }
+    return { pins, rows, gardees };
+  };
+
+  if (!existsSync(followupsPath)) {
+    return { purged: false, appNum: num, pins: 0, rows: 0, followups: followupsPath, reason: 'no-followups-file' };
+  }
+
+  if (options.dryRun) {
+    const { pins, rows } = compte(readFileSync(followupsPath, 'utf-8'));
+    return {
+      purged: pins + rows > 0, appNum: num, pins, rows, followups: followupsPath, dryRun: true,
+      ...(pins + rows === 0 ? { reason: 'nothing-to-purge' } : {}),
+    };
+  }
+
+  const lockDir = resolveLockDir(options.lockDir, followupsPath);
+  const lock = await acquireFollowupsLock(lockDir, followupsPath, {
+    timeoutMs: options.lockTimeoutMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS', 60_000),
+    retryMs: options.lockRetryMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS', 75),
+    staleMs: options.lockStaleMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS', 10 * 60_000),
+  });
+
+  try {
+    // Relu SOUS le verrou : entre le existsSync ci-dessus et ici, une tournée de
+    // relances a pu écrire.
+    if (!existsSync(followupsPath)) {
+      return { purged: false, appNum: num, pins: 0, rows: 0, followups: followupsPath, reason: 'no-followups-file' };
+    }
+    const { pins, rows, gardees } = compte(readFileSync(followupsPath, 'utf-8'));
+    if (pins + rows === 0) {
+      return { purged: false, appNum: num, pins: 0, rows: 0, followups: followupsPath, reason: 'nothing-to-purge' };
+    }
+    writeFileAtomic(followupsPath, gardees.join('\n'));
+    return { purged: true, appNum: num, pins, rows, followups: followupsPath };
+  } finally {
+    lock.release();
+  }
+}
+
 // --- Core: backfill all Applied rows ---------------------------------------
 
 /**
