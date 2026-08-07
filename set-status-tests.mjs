@@ -1121,5 +1121,182 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   }
 }
 
+// ── --create: a company selector that matches nothing is a new application ──
+//
+// WHY THIS EXISTS: the follow-up cadence reads the tracker, not what n8n sent.
+// An application prepared by the n8n pipeline has no tracker row (rows are born
+// from the local evaluation flow), so set-status exited 2 and the application
+// was never relanced. --create closes that loop; these tests pin the guards that
+// keep it from becoming a way to mint junk rows.
+{
+  const today = new Date().toISOString().slice(0, 10);
+
+  // 1. Nominal creation.
+  {
+    const sb = makeSandbox(TRACKER_9);
+    try {
+      const r = runSetStatus(
+        ['Devoteam', 'Applied', '--role', 'RPA Engineer', '--note', 'sent by n8n to rh@devoteam.com', '--create', '--json'],
+        sb,
+      );
+      const j = JSON.parse(r.stdout);
+      const text = readTracker(sb);
+      const line = text.split('\n').find(l => l.includes('Devoteam')) ?? '';
+      const cells = line.split('|').map(s => s.trim());
+      const ok = r.code === 0
+        && j.created === true
+        && j.num === 4                      // max(1,2,3) + 1
+        && j.oldStatus === null             // no prior state to report
+        && j.followupSeedCandidate === true // the #1430 hook fires
+        && cells[1] === '4' && cells[2] === today && cells[3] === 'Devoteam'
+        && cells[4] === 'RPA Engineer' && cells[5] === '—' && cells[6] === 'Applied'
+        && cells[9] === 'sent by n8n to rh@devoteam.com'
+        // The rows that were already there must round-trip untouched.
+        && text.includes('| 1 | 2026-06-01 | Acme | Backend Engineer | 4.2/5 | Evaluated |');
+      if (ok) pass('--create adds the row with the next #, today, no-data score, and fires the seed hook');
+      else fail(`--create nominal (code=${r.code}, json=${r.stdout.trim()}, line=${line})`);
+    } finally {
+      rmSync(sb.dir, { recursive: true, force: true });
+    }
+  }
+
+  // 2. Replaying the same call must not duplicate the row, and must NOT re-fire
+  //    the seed hook — a second pin in follow-ups.md would move the next
+  //    follow-up date every time n8n retried.
+  {
+    const sb = makeSandbox(TRACKER_9);
+    try {
+      const args = ['Devoteam', 'Applied', '--role', 'RPA Engineer', '--note', 'sent by n8n', '--create', '--json'];
+      runSetStatus(args, sb);
+      const r = runSetStatus(args, sb);
+      const j = JSON.parse(r.stdout);
+      const occurrences = readTracker(sb).split('\n').filter(l => l.includes('Devoteam')).length;
+      const ok = r.code === 0 && occurrences === 1
+        && j.changed === false && j.created === undefined && j.followupSeedCandidate === undefined;
+      if (ok) pass('--create is idempotent: replay finds the row, no duplicate, no second seed');
+      else fail(`--create replay (code=${r.code}, rows=${occurrences}, json=${r.stdout.trim()})`);
+    } finally {
+      rmSync(sb.dir, { recursive: true, force: true });
+    }
+  }
+
+  // 3. An existing company is updated, never duplicated.
+  {
+    const sb = makeSandbox(TRACKER_9);
+    try {
+      const r = runSetStatus(['Globex', 'Applied', '--role', 'Platform Engineer', '--create', '--json'], sb);
+      const j = JSON.parse(r.stdout);
+      const occurrences = readTracker(sb).split('\n').filter(l => l.includes('Globex')).length;
+      const ok = r.code === 0 && j.created === undefined && j.num === 2 && occurrences === 1;
+      if (ok) pass('--create updates an existing company instead of adding a second row');
+      else fail(`--create on existing company (code=${r.code}, rows=${occurrences}, json=${r.stdout.trim()})`);
+    } finally {
+      rmSync(sb.dir, { recursive: true, force: true });
+    }
+  }
+
+  // 4. Ambiguity still fails closed. --create must not become an escape hatch
+  //    that mints a third Acme row when two already match.
+  {
+    const sb = makeSandbox(TRACKER_9);
+    try {
+      const before = readTracker(sb);
+      const r = runSetStatus(['Acme', 'Applied', '--role', 'Quantum Blacksmith', '--create', '--json'], sb);
+      const ok = r.code === 3 && readTracker(sb) === before;
+      if (ok) pass('--create still fails closed on an ambiguous company, nothing written');
+      else fail(`--create ambiguity (code=${r.code}, changed=${readTracker(sb) !== before})`);
+    } finally {
+      rmSync(sb.dir, { recursive: true, force: true });
+    }
+  }
+
+  // 5. Guards: --create needs a role, and refuses every row-ID selector.
+  {
+    const cases = [
+      ['no --role', ['Devoteam', 'Applied', '--create', '--json']],
+      ['bare number', ['7', 'Applied', '--role', 'X', '--create', '--json']],
+      ['--row', ['--row', '1', 'Applied', '--role', 'X', '--create', '--json']],
+      ['--report', ['--report', '1', 'Applied', '--role', 'X', '--create', '--json']],
+    ];
+    const failures = [];
+    for (const [label, args] of cases) {
+      const sb = makeSandbox(TRACKER_9);
+      try {
+        const before = readTracker(sb);
+        const r = runSetStatus(args, sb);
+        if (r.code !== 1 || readTracker(sb) !== before) failures.push(`${label} (code=${r.code})`);
+      } finally {
+        rmSync(sb.dir, { recursive: true, force: true });
+      }
+    }
+    if (failures.length === 0) pass('--create rejects a missing role and every row-ID selector, writing nothing');
+    else fail(`--create guards that did not hold: ${failures.join('; ')}`);
+  }
+
+  // 6. Without --create the exit code stays 2, and the message now says how to
+  //    proceed instead of leaving the caller guessing.
+  {
+    const sb = makeSandbox(TRACKER_9);
+    try {
+      const r = runSetStatus(['Devoteam', 'Applied', '--json'], sb);
+      const j = JSON.parse(r.stdout);
+      const ok = r.code === 2 && j.code === 'not-found' && j.error.includes('--create');
+      if (ok) pass('without --create the not-found exit stays 2 and points at --create');
+      else fail(`not-found contract (code=${r.code}, json=${r.stdout.trim()})`);
+    } finally {
+      rmSync(sb.dir, { recursive: true, force: true });
+    }
+  }
+
+  // 7. The created row follows the tracker's own column layout, not a fixed
+  //    order — a 10-column tracker with Location must not get shifted cells.
+  {
+    const sb = makeSandbox(TRACKER_10);
+    try {
+      const r = runSetStatus(['Devoteam', 'Applied', '--role', 'RPA Engineer', '--create', '--json'], sb);
+      const line = readTracker(sb).split('\n').find(l => l.includes('Devoteam')) ?? '';
+      const cells = line.split('|').map(s => s.trim());
+      // | # | Date | Company | Role | Location | Score | Status | PDF | Report | Notes |
+      const ok = r.code === 0 && cells[3] === 'Devoteam' && cells[4] === 'RPA Engineer'
+        && cells[6] === '—' && cells[7] === 'Applied';
+      if (ok) pass('--create respects a 10-column layout (Status lands in the Status column)');
+      else fail(`--create on 10-col tracker (code=${r.code}, line=${line})`);
+    } finally {
+      rmSync(sb.dir, { recursive: true, force: true });
+    }
+  }
+
+  // 8. The transition ledger records "-" as the prior state: a created row did
+  //    not transition out of anything, and funnel-velocity reads "-" as unknown.
+  {
+    const sb = makeSandbox(TRACKER_9);
+    try {
+      runSetStatus(['Devoteam', 'Applied', '--role', 'RPA Engineer', '--create', '--json'], sb);
+      const ledger = readFileSync(join(sb.dir, 'status-log.tsv'), 'utf-8').trim();
+      const [num, , from, to] = ledger.split('\t');
+      const ok = num === '4' && from === '-' && to === 'Applied';
+      if (ok) pass('--create logs the transition with "-" as the unknown prior state');
+      else fail(`--create ledger line: ${JSON.stringify(ledger)}`);
+    } finally {
+      rmSync(sb.dir, { recursive: true, force: true });
+    }
+  }
+
+  // 9. --dry-run previews the creation without touching the tracker.
+  {
+    const sb = makeSandbox(TRACKER_9);
+    try {
+      const before = readTracker(sb);
+      const r = runSetStatus(['Devoteam', 'Applied', '--role', 'RPA Engineer', '--create', '--dry-run', '--json'], sb);
+      const j = JSON.parse(r.stdout);
+      const ok = r.code === 0 && j.created === true && j.dryRun === true && readTracker(sb) === before;
+      if (ok) pass('--create --dry-run reports the creation and writes nothing');
+      else fail(`--create dry-run (code=${r.code}, changed=${readTracker(sb) !== before}, json=${r.stdout.trim()})`);
+    } finally {
+      rmSync(sb.dir, { recursive: true, force: true });
+    }
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

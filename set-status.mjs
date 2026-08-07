@@ -70,7 +70,7 @@
 import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, isSeparatorRow } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
@@ -94,6 +94,10 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
   --report N         Select the row whose Report cell links report #N
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
+  --create           Create the row when the COMPANY selector matches nothing.
+                     Requires --role. Never valid with --row/--report or a bare #:
+                     you cannot invent tracker row #7 on demand, only a new
+                     application at a company that has none yet.
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
   --force            Allow a numeric selector despite a report-link mismatch, or despite a
@@ -109,7 +113,7 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, on: null, row: null, report: null, force: false, dryRun: false, json: false };
+const flags = { note: null, role: null, on: null, row: null, report: null, force: false, create: false, dryRun: false, json: false };
 const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report' };
 
 for (let i = 0; i < rawArgs.length; i++) {
@@ -130,6 +134,7 @@ for (let i = 0; i < rawArgs.length; i++) {
     i++;
   }
   else if (a === '--force') { flags.force = true; }
+  else if (a === '--create') { flags.create = true; }
   else if (a === '--dry-run') { flags.dryRun = true; }
   else if (a === '--json') { flags.json = true; }
   else if (a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
@@ -171,6 +176,25 @@ const stateInput = explicitSelector ? positional[0] : positional[1];
 // --row/--report are numeric too but carry an explicit number space, so they
 // must not be treated as ambiguous.
 const isBareNumericSelector = selector !== null && /^\d+$/.test(selector);
+
+// --create only means something for a COMPANY selector. A row ID names a row
+// that must already exist, so "create #7" has no meaning — and silently
+// accepting it would let a typo'd number mint a blank application.
+//
+// The --role requirement is not bureaucracy: a row with an empty Role can never
+// be narrowed by --role afterwards (resolveCandidates has nothing to match on),
+// and followup-cadence.mjs has no name for the opening it is relancing.
+if (flags.create) {
+  if (explicitSelector) {
+    failUsage('--create takes a company selector — --row/--report name a row that must already exist');
+  }
+  if (isBareNumericSelector) {
+    failUsage(`--create expects a company name, got the bare number "${selector}" — that names an existing row, not a new application`);
+  }
+  if (!flags.role) {
+    failUsage('--create requires --role: a row with no role cannot be disambiguated later, and the follow-up cadence has nothing to call the opening');
+  }
+}
 
 // Shared with every other canonical tracker-writer CLI (tracker-utils.mjs) so
 // the JSON-vs-human error contract can't drift between them.
@@ -305,10 +329,19 @@ function resolveRow(rows) {
 
   const key = normalizeCompany(selector);
   if (!key) failUsage(`Selector "${selector}" is empty after normalization`);
+  const matches = rows.filter(r => normalizeCompany(r.company) === key);
+
+  // With --create, "no such company" is not a lookup failure — it is a first
+  // application. Only reachable on the company path (the guard at parse time
+  // rejects --create for every row-ID selector), and only when NOTHING matched:
+  // an ambiguous 2+ match still fails closed rather than minting a duplicate.
+  if (matches.length === 0 && flags.create) return null;
+
   return resolveCandidates(
-    rows.filter(r => normalizeCompany(r.company) === key),
+    matches,
     {
-      notFound: `No tracker row with company matching "${selector}"`,
+      notFound: `No tracker row with company matching "${selector}"`
+        + (flags.create ? '' : ' (pass --create --role "..." to add it)'),
       ambiguous: (count, listing) =>
         `Company "${selector}" matches ${count} rows — pass the # or narrow with --role:\n${listing}`,
     },
@@ -336,11 +369,51 @@ for (let i = 0; i < lines.length; i++) {
   const row = parseTrackerRow(lines[i], colmap);
   if (row) rows.push({ ...row, lineIdx: i });
 }
-if (rows.length === 0) {
+if (rows.length === 0 && !flags.create) {
   failWith(EXIT_NOT_FOUND, 'empty-tracker', `Tracker at ${APPS_FILE} has no data rows`);
 }
 
-const target = resolveRow(rows);
+let target = resolveRow(rows);
+const created = target === null;
+
+if (created) {
+  // A first application at this company. The row is built through the same
+  // colmap, the same lock and the same atomic write as an update, so a created
+  // row is indistinguishable from one the local evaluation flow wrote.
+  //
+  // Only the identity cells are filled here. Status and Notes are left empty on
+  // purpose: the shared path below fills them, so creation and update cannot
+  // drift apart on note idempotency, status validation, or the ledger.
+  const nextNum = rows.reduce((max, r) => Math.max(max, Number.isFinite(r.num) ? r.num : 0), 0) + 1;
+  const width = Math.max(...Object.values(colmap).filter(v => Number.isFinite(v)));
+  const parts = new Array(width + 1).fill('');
+  const put = (field, value) => { if (Number.isFinite(colmap[field])) parts[colmap[field]] = value; };
+
+  put('num', String(nextNum));
+  put('date', flags.on ?? new Date().toISOString().slice(0, 10));
+  put('company', cell(selector));
+  put('role', cell(flags.role));
+  // "—" is the tracker's own no-data sentinel (see SCORE_CELL_RE in
+  // tracker-parse.mjs). An application sent without a local evaluation really
+  // has no score, and inventing "0/5" would poison every average that reads it.
+  put('score', '—');
+  put('pdf', '❌');
+  put('report', '—');
+
+  // After the last data row; on a tracker that has only its header, after the
+  // separator — appending at EOF there would put the row outside the table.
+  let at = lines.length;
+  if (rows.length > 0) {
+    at = rows[rows.length - 1].lineIdx + 1;
+  } else {
+    for (let i = 0; i < lines.length; i++) if (isSeparatorRow(lines[i])) at = i + 1;
+  }
+  lines.splice(at, 0, rebuildRow(parts));
+
+  // status '-' is the ledger's documented "unknown prior state", which is
+  // exactly what a row that did not exist a moment ago had.
+  target = { num: nextNum, company: cell(selector), role: cell(flags.role), status: '-', report: '', lineIdx: at };
+}
 
 // A BARE numeric selector is often copied from a report filename. If the row ID
 // disagrees with its local report link, silently updating that row can affect
@@ -499,10 +572,13 @@ lock?.release();
 
 const result = {
   changed,
+  ...(created ? { created: true } : {}),
   num: target.num,
   company: target.company,
   role: target.role,
-  oldStatus,
+  // A created row had no prior state; reporting "-" as if it were one would let
+  // a consumer record a transition that never happened.
+  oldStatus: created ? null : oldStatus,
   newStatus,
   ...(note != null ? { note } : {}),
   ...(flags.dryRun ? { dryRun: true } : {}),
@@ -518,7 +594,10 @@ if (flags.json) {
   console.log(JSON.stringify(result, null, 2));
 } else {
   const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';
-  console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${verb} ${oldStatus} → ${newStatus}${note ? ` (note: ${note})` : ''}`);
+  const transition = created
+    ? `${flags.dryRun ? 'would create' : 'created'} as ${newStatus}`
+    : `${verb} ${oldStatus} → ${newStatus}`;
+  console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${transition}${note ? ` (note: ${note})` : ''}`);
   if (statusChanged && !flags.dryRun && newStatus === 'Applied') {
     console.error('ℹ️  Status is Applied — consider seeding follow-ups in data/follow-ups.md (#1430: node followup-cadence.mjs)');
   }
