@@ -3,6 +3,7 @@ import path from "node:path";
 import { careerOpsRoot, readInbox } from "@/lib/career-ops";
 import { erreurOpenAi, executeLlm } from "@/lib/llm-runner";
 import { parseFit, promptFit } from "@/lib/pipeline-fit.mjs";
+import { planAnnonce, texteDepuisHtml } from "@/lib/annonce-source.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,37 +61,58 @@ function urlSure(brut: string): URL | null {
   return u;
 }
 
-function texteDePage(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&(?:nbsp|#160);/gi, " ")
-    .replace(/&(?:amp|#38);/gi, "&")
-    .replace(/&(?:quot|#34);/gi, '"')
-    .replace(/&(?:#39|apos);/gi, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-async function litAnnonce(brut: string): Promise<string> {
-  const u = urlSure(brut);
-  if (!u) return "";
+async function recupere(u: URL, accept: string): Promise<Response | null> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), DELAI_MS);
   try {
     const r = await fetch(u, {
       signal: ctrl.signal,
       redirect: "follow",
-      headers: { "user-agent": "Mozilla/5.0 (career-ops pipeline-fit)", accept: "text/html,*/*" },
+      headers: { "user-agent": "Mozilla/5.0 (career-ops pipeline-fit)", accept },
     });
-    if (!r.ok) return "";
-    return texteDePage((await r.text()).slice(0, TAILLE_MAX));
+    return r.ok ? r : null;
   } catch {
-    return "";
+    return null;
   } finally {
     clearTimeout(t);
   }
+}
+
+/**
+ * Le texte de l'annonce, par le meilleur chemin disponible.
+ *
+ * D'ABORD l'API publique du tableau ATS quand il est reconnu. Un
+ * `jobs.ashbyhq.com` est une application React : récupérer sa page rend une
+ * coquille vide, et l'évaluation échouait en « annonce illisible » — constaté en
+ * production le 2026-08-07. La même offre est parfaitement lisible par
+ * `api.ashbyhq.com`, que `providers/ashby.mjs` interroge déjà pour la découvrir.
+ *
+ * ENSUITE la page, pour tout le reste (forum, pages statiques). Le repli sert
+ * aussi quand l'API d'un ATS reconnu ne rend rien : un tableau peut avoir retiré
+ * l'offre alors que la page existe encore.
+ */
+async function litAnnonce(brut: string): Promise<{ texte: string; via: string }> {
+  const u = urlSure(brut);
+  if (!u) return { texte: "", via: "url refusée" };
+
+  const plan = planAnnonce(brut);
+  if (plan) {
+    const uApi = urlSure(plan.requete);
+    const r = uApi ? await recupere(uApi, "application/json") : null;
+    if (r) {
+      try {
+        const texte = texteDepuisHtml(plan.extrait(await r.json()));
+        if (texte.length >= 200) return { texte, via: `api ${plan.ats}` };
+      } catch {
+        /* payload illisible : on retombe sur la page */
+      }
+    }
+  }
+
+  const r = await recupere(u, "text/html,*/*");
+  if (!r) return { texte: "", via: plan ? `api ${plan.ats} muette, page injoignable` : "page injoignable" };
+  const texte = texteDepuisHtml((await r.text()).slice(0, TAILLE_MAX));
+  return { texte, via: plan ? `api ${plan.ats} muette, repli page` : "page" };
 }
 
 function profilCv(): string {
@@ -121,16 +143,17 @@ export async function POST(req: Request) {
     return erreurOpenAi(`offre introuvable dans le pipeline : ${url.slice(0, 200)}`, 404, "invalid_request_error");
   }
 
-  const texteAnnonce = await litAnnonce(url);
+  const { texte: texteAnnonce, via } = await litAnnonce(url);
   // Sans le texte, il n'y a rien de plus a dire que ce que le score dit deja :
   // evaluer a l'aveugle produirait exactement le jugement sans fondement que ce
   // module existe pour eviter.
   if (!texteAnnonce || texteAnnonce.length < 200) {
     return Response.json(
       {
-        error: "annonce illisible : page injoignable, vide, ou rendue par JavaScript",
+        error: `annonce illisible (${via}) : injoignable, vide, ou rendue par JavaScript`,
         offre,
         annonceLue: texteAnnonce.length,
+        via,
       },
       { status: 422 },
     );
@@ -144,6 +167,7 @@ export async function POST(req: Request) {
       ...parseFit(r.texte, texteAnnonce),
       offre,
       annonceLue: texteAnnonce.length,
+      via,
       compte: r.compte,
     });
   } catch (e) {
