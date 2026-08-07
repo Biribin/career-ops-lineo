@@ -282,6 +282,10 @@ const scripts = [
   { name: 'company-history.test.mjs', expectExit: 0 },
   { name: 'contacts.test.mjs', expectExit: 0 },
   { name: 'reply-matcher.test.mjs', expectExit: 0 },
+  // La regle de decision de la synchronisation de couche utilisateur. Aucun
+  // acces reseau : le test n'exerce que `decide()`, la seule partie capable de
+  // faire perdre du travail en ecrasant le serveur.
+  { name: 'deploy/sync-user-layer-tests.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each

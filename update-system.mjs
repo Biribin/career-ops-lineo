@@ -339,6 +339,7 @@ const SYSTEM_PATHS = [
   '.dockerignore',
   'Dockerfile.web',
   'docker-entrypoint-web.sh',
+  'deploy/',
   'cops',
   'DOCKER.md',
   'plugins/',
