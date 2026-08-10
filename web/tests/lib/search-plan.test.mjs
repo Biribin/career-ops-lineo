@@ -80,22 +80,64 @@ test("une requête de config qui double un mot-clé ne le duplique pas", () => {
 });
 
 test("les URLs ont le format exact que le workflow consommait déjà", () => {
-  const { urls } = urlsFranceTravail({ motsCles: ["ingénieur automatisation IA"], communes: ["75056"], rayon: 20 });
+  const { urls } = urlsFranceTravail({ motsCles: ["ingénieur automatisation IA"], communes: ["75056"], distance: 20 });
   assert.equal(urls.length, 1);
   const u = new URL(urls[0]);
   assert.equal(`${u.origin}${u.pathname}`, BASE_FT);
   assert.equal(u.searchParams.get("commune"), "75056");
-  assert.equal(u.searchParams.get("rayon"), "20");
+  assert.equal(u.searchParams.get("distance"), "20");
   assert.equal(u.searchParams.get("motsCles"), "ingénieur automatisation IA");
   assert.equal(u.searchParams.get("range"), "0-149");
 });
 
-test("sans commune : recherche France entière, pas de rayon parasite", () => {
+test("le rayon part sous le nom « distance », le seul que l'API honore", () => {
+  // Régression du 2026-08-10. Mesuré contre l'API, requête « automatisation »
+  // autour de Paris : rayon=30 et rayon=100 rendent 14 offres, exactement comme
+  // distance=10 (le défaut), pendant que distance=100 en rend 29. France Travail
+  // ne rejette pas les paramètres inconnus : `rayon` était donc ignoré EN
+  // SILENCE, et la tournée cherchait dans 10 km en croyant en faire 30.
+  const { urls } = urlsFranceTravail({ motsCles: ["n8n"], communes: ["75056"], distance: 100 });
+  const u = new URL(urls[0]);
+  assert.equal(u.searchParams.get("distance"), "100");
+  assert.equal(u.searchParams.get("rayon"), null, "`rayon` est ignoré par l'API : ne jamais l'émettre");
+});
+
+test("l'ancien nom `rayon` en config reste honoré, sous le bon paramètre", () => {
+  // Un portals.yml pas encore renommé ne doit pas perdre silencieusement son
+  // rayon — il doit juste partir sous le nom que l'API comprend.
+  const { urls } = urlsFranceTravail({ motsCles: ["n8n"], communes: ["75056"], rayon: 45 });
+  const u = new URL(urls[0]);
+  assert.equal(u.searchParams.get("distance"), "45");
+  assert.equal(u.searchParams.get("rayon"), null);
+});
+
+test("sans commune : recherche France entière, pas de distance parasite", () => {
   const { urls } = urlsFranceTravail({ motsCles: ["n8n"], communes: [] });
   const u = new URL(urls[0]);
   assert.equal(u.searchParams.get("commune"), null);
-  assert.equal(u.searchParams.get("rayon"), null, "un rayon sans commune n'a pas de sens");
+  assert.equal(u.searchParams.get("distance"), null, "une distance sans commune n'a pas de sens");
+  assert.equal(u.searchParams.get("rayon"), null);
   assert.equal(u.searchParams.get("motsCles"), "n8n");
+});
+
+test("les continents ajoutent des requêtes hors France, APRÈS la France", () => {
+  // L'ordre compte : prepareLot tronque dans l'ordre d'arrivée, et le corpus
+  // international de France Travail est à 84 % luxembourgeois (1 423 offres sur
+  // 1 691, mesuré le 2026-08-10). L'Europe en tête ferait manger les places du
+  // lot par du Luxembourg avant que la France n'arrive.
+  const { urls } = urlsFranceTravail({ motsCles: ["n8n", "RPA"], communes: [], continents: ["991"], max: 99 });
+  assert.equal(urls.length, 4, "2 mots-clés × (France + Europe)");
+  const zones = urls.map((u) => new URL(u).searchParams.get("paysContinent"));
+  assert.deepEqual(zones, [null, null, "991", "991"], "la France passe en premier");
+  const euro = new URL(urls[2]);
+  assert.equal(euro.searchParams.get("motsCles"), "n8n");
+  assert.equal(euro.searchParams.get("commune"), null, "hors France : aucune commune");
+});
+
+test("un continent vide ou blanc est ignoré au lieu de produire une URL cassée", () => {
+  const { urls } = urlsFranceTravail({ motsCles: ["n8n"], communes: [], continents: ["", "  ", null], max: 99 });
+  assert.equal(urls.length, 1, "seule la requête France subsiste");
+  assert.equal(new URL(urls[0]).searchParams.get("paysContinent"), null);
 });
 
 test("plusieurs communes = une URL par couple (mot-clé, commune)", () => {
@@ -118,7 +160,7 @@ test("planRecherche rend un plan complet et auto-descriptif", () => {
       block: [],
       alwaysAllow: ["Remote", "Télétravail"],
     },
-    ft: { mots_cles: ["ingénieur automatisation IA"], communes: ["75056"], rayon: 20, max_urls: 8 },
+    ft: { mots_cles: ["ingénieur automatisation IA"], communes: ["75056"], distance: 20, max_urls: 8 },
   });
   assert.equal(plan.source, "portals.yml");
   assert.equal(plan.urls.length, 8);
