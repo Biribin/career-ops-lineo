@@ -21,7 +21,32 @@ import { comptesDisponibles, estPlafond } from "@/lib/llm-quota.mjs";
 // payer un cycle de redéploiement par hypothèse.
 
 export const CLI_DEFAUT = "claude";
-const TIMEOUT_CLI_MS = 280_000;
+
+/**
+ * Budget d'un appel au CLI.
+ *
+ * Porté de 280 s à 900 s le 2026-08-10. Ce qui commande cette valeur, c'est la
+ * SORTIE, pas le prompt : le tri de la tournée demande jusqu'à 60 offres
+ * retenues, donc 60 phrases `whyMatch` à rédiger. Mesuré à lot d'entrée
+ * identique (409 offres brutes, 150 soumises au modèle) :
+ *
+ *   max=5   ->  60 s, réussi
+ *   max=60  -> 285 s, CLI tué au plafond de 280 s
+ *
+ * `maxRetenues: 60` (nœud « ⚙️ Config » du workflow) et un plafond à 280 s
+ * étaient donc incompatibles : la tournée de 9h échouait chaque jour.
+ *
+ * ⚠️ CES TROIS BUDGETS SE TIENNENT, NE JAMAIS EN BOUGER UN SEUL :
+ *   1. ici, TIMEOUT_CLI_MS ................................ 900 s
+ *   2. `maxDuration` de la route /api/rank ................ 950 s
+ *   3. le timeout du nœud n8n « career-ops: tri des offres » 950 s
+ * Relever le plus court sans les autres ne corrige rien : ça déplace juste
+ * l'endroit où la chaîne casse.
+ *
+ * 900 s pour une tournée de fond déclenchée par un cron à 9h ne coûte rien :
+ * personne n'attend devant l'écran.
+ */
+const TIMEOUT_CLI_MS = 900_000;
 
 export type ResultatLlm =
   | { ok: true; texte: string; cliId: string; compte: string }
@@ -158,7 +183,9 @@ function lanceUneFois(
 
     let out = "";
     let err = "";
+    let coupeAuTimeout = false;
     const killer = setTimeout(() => {
+      coupeAuTimeout = true;
       try {
         child.kill("SIGTERM");
       } catch {
@@ -179,9 +206,31 @@ function lanceUneFois(
     child.on("close", (code) => {
       clearTimeout(killer);
 
-      // AVANT tout : est-ce un refus pour plafond ? Le CLI répond ce message
-      // avec un code de sortie 0, donc c'est le seul endroit où on peut
-      // l'attraper avant qu'il ne devienne « la réponse du modèle ».
+      // COUPÉ AU TIMEOUT : la sortie partielle n'est PAS une réponse.
+      //
+      // C'est le piège qui a coûté une heure de diagnostic le 2026-08-10. Le CLI
+      // tué avait déjà émis du JSON tronqué ; ce fragment repartait comme un
+      // succès, et `parseRank` le refusait avec « reponse hors format (pas
+      // d'objet avec une cle jobs) ». On cherchait donc un problème de format de
+      // réponse là où il n'y avait qu'un dépassement de budget. Un timeout doit
+      // se dire timeout, et porter sa durée.
+      if (coupeAuTimeout) {
+        resolve({
+          ok: false,
+          plafond: false,
+          status: 504,
+          message:
+            `${spec.name} a été coupé après ${Math.round(TIMEOUT_CLI_MS / 1000)} s ` +
+            `(TIMEOUT_CLI_MS). La sortie partielle est jetée : ce n'est pas une réponse du modèle. ` +
+            `Si ça se reproduit, c'est le VOLUME DE SORTIE qu'il faut réduire — le nombre d'offres ` +
+            `retenues (maxRetenues) commande la durée bien plus que la taille du prompt.`,
+        });
+        return;
+      }
+
+      // Est-ce un refus pour plafond ? Le CLI répond ce message avec un code de
+      // sortie 0, donc c'est le seul endroit où on peut l'attraper avant qu'il
+      // ne devienne « la réponse du modèle ».
       if (estPlafond(out, err)) {
         resolve({
           ok: false,

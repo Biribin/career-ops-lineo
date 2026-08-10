@@ -6,7 +6,10 @@ import { profilCv } from "@/lib/profil-cv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+// 2e des TROIS budgets qui se tiennent — voir TIMEOUT_CLI_MS dans llm-runner.ts
+// pour la mesure. Doit rester AU-DESSUS du plafond du CLI (900 s), sinon la
+// route coupe avant lui et on perd le message d'erreur qui dit quoi corriger.
+export const maxDuration = 950;
 
 // Tri des offres France Travail. Appelé par le workflow n8n « Découverte ».
 //
