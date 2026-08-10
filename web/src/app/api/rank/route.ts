@@ -72,7 +72,14 @@ export async function POST(req: Request) {
   }
 
   const filtres = lireFiltresPortals();
-  const maxRetenues = Number.isFinite(Number(body.max)) ? Math.max(1, Math.min(20, Number(body.max))) : 5;
+  // Plafonné par la taille du lot, pas par une constante arbitraire : on ne peut
+  // pas retenir plus d'offres qu'on n'en a envoyées au modèle. L'ancien plafond
+  // dur à 20 empêchait Linéo de demander la tournée qu'il veut — voir 60
+  // annonces neuves par jour et trancher lui-même (garder / écarter / plus tard)
+  // — en bridant silencieusement sa demande à un tiers.
+  const maxRetenues = Number.isFinite(Number(body.max))
+    ? Math.max(1, Math.min(lot.offres.length, Number(body.max)))
+    : 5;
 
   // Le profil est lu COTE SERVEUR, pas recu de n8n. Sans lui, le score mesurait
   // « cette offre contient mes mots-cles » et non « je corresponds a cette

@@ -22,8 +22,26 @@
 // « oublie » silencieusement la moitié du lot. On borne donc explicitement, et on
 // DIT ce qu'on a écarté.
 
-/** Au-delà, le prompt devient ingérable pour un seul appel. */
-export const MAX_OFFRES = 60;
+/**
+ * Le nombre d'offres soumises au modèle en un seul appel.
+ *
+ * Porté de 60 à 150 le 2026-08-10, sur mesure de la tournée réelle : 941 offres
+ * brutes, 659 uniques et neuves, dont 60 seulement atteignaient le tri. Les 599
+ * autres étaient écartées par ce plafond, sans qu'aucun critère de pertinence
+ * n'intervienne — Linéo recevait donc les premières arrivées, pas les meilleures.
+ *
+ * Mesuré, pas estimé : 150 offres à MAX_DESCRIPTION près font un prompt de
+ * ~148 000 caractères (~37 k tokens), contre ~63 000 à 60 offres. Le CLI est
+ * coupé à 280 s, le nœud n8n à 290 s et la route à 300 s : si un appel à 150
+ * dépasse ce budget, c'est ce plafond qu'il faut redescendre, pas le timeout.
+ *
+ * Ce que ce plafond NE règle pas : il tronque dans l'ordre d'arrivée, donc dans
+ * l'ordre des requêtes. Ce sont les premiers mots-clés de `france_travail` qui
+ * remplissent les 150 places — d'où l'importance de les ranger du plus ciblé au
+ * plus large. Le reste n'est pas perdu pour autant : le filtre `dejaVus` écarte
+ * à la tournée suivante ce qui a déjà été vu, et la tranche suivante remonte.
+ */
+export const MAX_OFFRES = 150;
 /** Assez pour juger la pertinence, sans recopier l'annonce entière. */
 export const MAX_DESCRIPTION = 700;
 
@@ -183,9 +201,19 @@ export function promptRank({ offres, filtres = {}, profil = "", maxRetenues = 5 
     "- Ce que le profil ne dit pas, le candidat ne le sait pas. Ne comble aucun trou.",
     "",
     "REGLES",
-    "- Garde au maximum " + maxRetenues + " offres, les plus pertinentes. Moins si peu correspondent.",
-    "- Une offre hors sujet ou dans un lieu refuse est ECARTEE, meme s'il ne reste rien.",
-    "- Ne garde JAMAIS une offre d'alternance, de stage ou d'apprentissage.",
+    "- Garde jusqu'a " + maxRetenues + " offres. Ce n'est PAS une preselection serree :",
+    "  c'est le candidat qui tranche ensuite, offre par offre. N'ecarte donc que ce",
+    "  qui est VRAIMENT inutilisable pour lui, et garde le reste avec son score,",
+    "  meme moyen. Un doute se resout en GARDANT l'offre, pas en la supprimant.",
+    "- Ce qui justifie d'ECARTER, et rien d'autre :",
+    "  1. hors sujet : le poste n'a aucun rapport avec ce que le candidat cherche ;",
+    "  2. lieu refuse ;",
+    "  3. alternance, stage ou apprentissage : JAMAIS, sans exception ;",
+    "  4. anciennete hors d'atteinte : l'annonce exige une seniorite ou un nombre",
+    "     d'annees d'experience que le profil ne peut pas presenter. Un intitule",
+    "     « Senior », « Lead », « Principal », « Staff », ou une exigence chiffree",
+    "     nettement au-dessus de l'experience du profil, se rejette meme si le",
+    "     sujet colle parfaitement : la candidature serait ecartee au premier tri.",
     "- whyMatch : une phrase factuelle qui relie un element de l'offre a un fait du",
     "  PROFIL. S'il manque une competence exigee, DIS-LE dans la meme phrase.",
     "  N'invente aucune competence du candidat, ne promets rien.",
