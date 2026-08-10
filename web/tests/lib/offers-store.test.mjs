@@ -9,10 +9,63 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { courrielContact, etatCourant, ligneDecision, lignesAAjouter, normaliseOffreRecue, offreComplete, parseJournal } from "../../src/lib/offers-store.mjs";
+import { courrielContact, etatCourant, ligneDecision, lignesAAjouter, lignesNonRetenues, normaliseOffreRecue, offreComplete, parseJournal, STATUTS_CLASSANTS } from "../../src/lib/offers-store.mjs";
 
 const T = "2026-08-06T12:00:00.000Z";
 const T2 = "2026-08-07T12:00:00.000Z";
+
+// -- NON_RETENUE : la memoire du bruit ----------------------------------------
+
+test("une offre NON_RETENUE disparait de la file affichee", () => {
+  // Sinon les 90 offres jugees et non gardees s'afficheraient comme des cartes a
+  // decider, ce qui serait pire que l'etat de depart.
+  assert.ok(STATUTS_CLASSANTS.includes("NON_RETENUE"));
+  const journal = [
+    { jobId: "BRUIT", statut: "A_DECIDER", vu_le: T },
+    { jobId: "BRUIT", statut: "NON_RETENUE", vu_le: T2 },
+    { jobId: "BONNE", statut: "A_DECIDER", vu_le: T },
+  ];
+  assert.deepEqual(
+    etatCourant(journal).map((o) => o.jobId),
+    ["BONNE"],
+  );
+});
+
+test("NON_RETENUE se distingue de ECARTEE : la machine et Lineo ne disent pas la meme chose", () => {
+  // On doit pouvoir revenir sur un verdict du modele sans effacer une decision
+  // humaine, donc les deux statuts ne se confondent pas.
+  const [l] = lignesNonRetenues([{ jobId: "A", title: "Data Scientist", score: 20 }], T);
+  assert.equal(l.statut, "NON_RETENUE");
+  assert.notEqual(l.statut, "ECARTEE");
+});
+
+test("les lignes non retenues portent de quoi comprendre, et bornent le score", () => {
+  const lignes = lignesNonRetenues(
+    [
+      { jobId: "A", title: "Data Scientist", score: 20, raison: "score 20 sous le plancher 40" },
+      { jobId: "B", title: "Autre", score: 250 },
+      { jobId: "C" },
+    ],
+    T,
+    { source: "n8n/decouverte", executionId: "42" },
+  );
+  assert.equal(lignes.length, 3);
+  assert.equal(lignes[0].raison, "score 20 sous le plancher 40");
+  assert.equal(lignes[1].score, 100, "le score reste borne a 0..100");
+  assert.equal(lignes[2].score, null, "pas de score = null, pas 0");
+  assert.equal(lignes[2].raison, "non gardee au tri", "une raison par defaut, jamais vide");
+  assert.equal(lignes[0].source, "n8n/decouverte");
+  assert.equal(lignes[0].execution_id, "42");
+  assert.equal(lignes[0].vu_le, T, "horodatage injecte, pas Date.now()");
+});
+
+test("une non-retenue sans jobId est ignoree, et les doublons du lot fusionnes", () => {
+  const lignes = lignesNonRetenues([{ title: "sans id" }, { jobId: "A" }, { jobId: "A" }], T);
+  assert.deepEqual(
+    lignes.map((l) => l.jobId),
+    ["A"],
+  );
+});
 
 test("une offre sans jobId est ecartee, pas stockee", () => {
   assert.equal(normaliseOffreRecue({ title: "sans id" }), null);
@@ -25,6 +78,12 @@ test("le score est borne, et un score absent devient null", () => {
   assert.equal(normaliseOffreRecue({ jobId: "A", score: 250 }).score, 100);
   assert.equal(normaliseOffreRecue({ jobId: "A", score: -8 }).score, 0);
   assert.equal(normaliseOffreRecue({ jobId: "A" }).score, null);
+  // `Number(null)` vaut 0 : sans garde explicite, un score null devenait 0 et
+  // l'offre s'affichait « notee 0/100 » au lieu de « pas encore evaluee ».
+  // Constate le 2026-08-10 sur une offre ajoutee a la main.
+  assert.equal(normaliseOffreRecue({ jobId: "A", score: null }).score, null);
+  assert.equal(normaliseOffreRecue({ jobId: "A", score: "" }).score, null);
+  assert.equal(normaliseOffreRecue({ jobId: "A", score: 0 }).score, 0, "un vrai 0 reste un 0");
 });
 
 test("chaque ligne porte statut, horodatage et execution", () => {

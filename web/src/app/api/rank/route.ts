@@ -1,7 +1,7 @@
 import { erreurOpenAi, executeLlm } from "@/lib/llm-runner";
 import { lireFiltresPortals, motsClesFranceTravail } from "@/lib/core/portals";
 import { litJournalOffres } from "@/lib/offers-journal";
-import { MAX_OFFRES, parseRank, prepareLot, promptRank } from "@/lib/rank.mjs";
+import { MAX_OFFRES, SCORE_MINIMUM, parseRank, prepareLot, promptRank, trieParPlancher } from "@/lib/rank.mjs";
 import { profilCv } from "@/lib/profil-cv";
 
 export const runtime = "nodejs";
@@ -25,7 +25,7 @@ export const maxDuration = 950;
 // le site public est derrière basic_auth côté Caddy.
 
 export async function POST(req: Request) {
-  let body: { offres?: unknown[]; max?: number; profil?: string };
+  let body: { offres?: unknown[]; max?: number; profil?: string; scoreMin?: number };
   try {
     body = await req.json();
   } catch {
@@ -97,12 +97,25 @@ export async function POST(req: Request) {
   // « cette offre contient mes mots-cles » et non « je corresponds a cette
   // offre » : c'est ce qui a fait remonter trois postes UiPath a 80+ alors que le
   // CV n'en contient pas une ligne.
+  // Le plancher de score, réglable par la requête sans redéploiement (nœud
+  // « ⚙️ Config » de n8n). Il est dit AU MODÈLE en plus d'être applique ici : sans
+  // ça il rédige jusqu'à 60 whyMatch dont une partie part à la poubelle, ce qui
+  // n'ajoute que de la latence — la durée du tri est commandée par la sortie.
+  const scoreMin = Number.isFinite(Number(body.scoreMin))
+    ? Math.max(0, Math.min(100, Number(body.scoreMin)))
+    : SCORE_MINIMUM;
+
+  // Le profil est lu COTE SERVEUR, pas recu de n8n. Sans lui, le score mesurait
+  // « cette offre contient mes mots-cles » et non « je corresponds a cette
+  // offre » : c'est ce qui a fait remonter trois postes UiPath a 80+ alors que le
+  // CV n'en contient pas une ligne.
   const profil = profilCv();
   const prompt = promptRank({
     offres: lot.offres,
     filtres,
     profil,
     maxRetenues,
+    scoreMin,
   });
 
   const r = await executeLlm(prompt);
@@ -117,8 +130,19 @@ export async function POST(req: Request) {
     return erreurOpenAi(e instanceof Error ? e.message : "reponse du modele illisible", 502);
   }
 
-  return Response.json({
+  // Le plancher, puis la trace de TOUT ce qui a été jugé sans être retenu.
+  // `nonRetenues` doit être inscrit au journal par /api/offers, sinon ces offres
+  // reviennent à chaque tournée se faire rejuger à l'identique.
+  const { gardes, nonRetenues } = trieParPlancher({
+    soumises: lot.offres,
     jobs: resultat.jobs,
+    scoreMin,
+  });
+
+  return Response.json({
+    jobs: gardes,
+    nonRetenues,
+    scoreMin,
     lot: {
       envoyees: lot.offres.length,
       doublons: lot.doublons,
@@ -130,6 +154,11 @@ export async function POST(req: Request) {
       // intitulé. C'est le seul chiffre qui dit si la troncature garde les bonnes
       // offres : avant le classement il dépendait de l'ordre des requêtes.
       cibleesGardees: lot.cibleesGardees,
+      // Ce que le modèle a rendu, avant le plancher — pour distinguer « il n'y
+      // avait rien de bon » de « le plancher est trop haut ».
+      renduesParLeModele: resultat.jobs.length,
+      sousLePlancher: resultat.jobs.length - gardes.length,
+      nonCitees: nonRetenues.length - (resultat.jobs.length - gardes.length),
     },
     // Un jobId que le modèle aurait inventé : écarté, mais signalé.
     inventes: resultat.inventes,

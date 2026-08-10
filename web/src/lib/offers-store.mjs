@@ -46,7 +46,10 @@ export function normaliseOffreRecue(brut) {
   const jobId = txt(o.jobId);
   if (!jobId) return null;
 
-  const score = Number(o.score);
+  // `Number(null)` vaut 0, pas NaN : sans cette garde, un `score: null` explicite
+  // devenait un score de 0 et l'offre s'affichait « notée 0/100 » au lieu de « pas
+  // encore évaluée ». Constaté le 2026-08-10 sur une offre ajoutée à la main.
+  const score = o.score === null || o.score === undefined || o.score === "" ? NaN : Number(o.score);
   return {
     jobId,
     title: txt(o.title),
@@ -94,8 +97,56 @@ export function lignesAAjouter(corps, vuLe) {
   return { lignes: retenues, ecartees };
 }
 
-/** Les décisions qui SORTENT une offre de la file, définitivement. */
-export const STATUTS_CLASSANTS = ["ECARTEE", "GENEREE", "POSTULEE"];
+/**
+ * Les statuts qui SORTENT une offre de la file, définitivement.
+ *
+ * Les trois premiers sont des décisions de Linéo. `NON_RETENUE` est une décision
+ * de la MACHINE, et elle est là pour une raison précise : sans elle, les offres
+ * soumises au tri mais non gardées n'étaient inscrites nulle part. Elles
+ * revenaient donc à CHAQUE tournée, remangeaient des places du lot et se
+ * refaisaient juger à l'identique — 90 offres sur 150 dans la tournée du
+ * 2026-08-10. Les inscrire les écarte de `dejaVus` au tour suivant, et
+ * `etatCourant` les masque de l'app.
+ *
+ * Statut distinct de `ECARTEE` exprès : « le modèle n'en a pas voulu » et « Linéo
+ * n'en veut pas » ne se valent pas, et il faut pouvoir revenir sur le premier
+ * sans perdre le second.
+ */
+export const STATUTS_CLASSANTS = ["ECARTEE", "GENEREE", "POSTULEE", "NON_RETENUE"];
+
+/**
+ * Les lignes de journal pour les offres soumises au tri et NON gardées.
+ *
+ * Volontairement minces : jobId, titre (pour qu'un humain qui relit le journal
+ * sache de quoi il s'agit) et le score s'il y en a un. Une offre sous le plancher
+ * a été notée par le modèle ; une offre que le modèle n'a pas citée du tout n'a
+ * pas de score, et `null` dit exactement ça.
+ *
+ * @param {Array<{jobId?: string, title?: string, score?: number|null, raison?: string}>} offres
+ * @param {string} quand  horodatage ISO, INJECTÉ (tests déterministes)
+ * @param {{source?: string, executionId?: string}} [ctx]
+ */
+export function lignesNonRetenues(offres, quand, ctx = {}) {
+  const out = [];
+  const vus = new Set();
+  for (const brut of Array.isArray(offres) ? offres : []) {
+    const jobId = txt(brut?.jobId);
+    if (!jobId || vus.has(jobId)) continue;
+    vus.add(jobId);
+    const score = Number(brut?.score);
+    out.push({
+      jobId,
+      title: txt(brut?.title),
+      score: Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : null,
+      statut: "NON_RETENUE",
+      raison: txt(brut?.raison) || "non gardee au tri",
+      vu_le: quand,
+      source: txt(ctx.source) || "n8n",
+      execution_id: txt(ctx.executionId),
+    });
+  }
+  return out;
+}
 
 /** action reçue → statut inscrit au journal. */
 const STATUT_PAR_ACTION = {

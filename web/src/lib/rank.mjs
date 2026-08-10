@@ -45,6 +45,24 @@ export const MAX_OFFRES = 150;
 /** Assez pour juger la pertinence, sans recopier l'annonce entière. */
 export const MAX_DESCRIPTION = 700;
 
+/**
+ * En dessous, une offre n'arrive pas dans la file de Linéo.
+ *
+ * Décision du 2026-08-10 : « s'il n'y a pas de bonne offre, pas obligé d'aller
+ * jusqu'à 60 ». Le plafond de retenues est un PLAFOND, pas un quota à remplir.
+ *
+ * 40 est mesuré, pas choisi au hasard. Sur les 110 offres en file ce jour-là :
+ *
+ *   plancher 30 -> 78 gardées : laisse passer « Formateur IA », « Ingénieur
+ *                  support IA », « Expert IA » — hors profil
+ *   plancher 40 -> 45 gardées : le premier niveau où ce qui reste est du métier
+ *   plancher 50 -> 22 gardées : jette tous les « Chef de projet IA », trop dur
+ *
+ * Réglable par la requête (`scoreMin` dans le corps POST, donc par le nœud
+ * « ⚙️ Config » de n8n) : ajuster le seuil ne doit pas demander un déploiement.
+ */
+export const SCORE_MINIMUM = 40;
+
 const txt = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
 
 /**
@@ -246,6 +264,63 @@ export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus, mots
 }
 
 /**
+ * Sépare ce qui entre dans la file de ce qui n'y entre pas, et dit POURQUOI.
+ *
+ * Deux populations sortent, et elles n'ont pas la même cause :
+ *
+ *  1. les offres que le modèle a gardées mais notées SOUS le plancher. Elles
+ *     existent parce qu'un plafond de 60 pousse à remplir : le modèle racle le
+ *     fond pour atteindre le quota. Le plancher est ce qui rend le plafond
+ *     inoffensif.
+ *  2. les offres soumises que le modèle n'a PAS citées. Jusqu'ici elles
+ *     n'étaient inscrites nulle part et revenaient à chaque tournée — 90 sur 150
+ *     le 2026-08-10 — pour se refaire juger à l'identique.
+ *
+ * Les deux sont rendues dans `nonRetenues` pour être inscrites au journal. Ce
+ * n'est PAS un effet de bord silencieux : sans cette inscription, « déjà jugée
+ * comme du bruit » n'existe pas et chaque tournée repaye le même tri.
+ *
+ * @param {Object} o
+ * @param {Array<{jobId: string, title?: string}>} o.soumises  le lot envoyé au modèle
+ * @param {Array<{jobId: string, title?: string, score?: number|null}>} o.jobs  ce que le modèle a gardé
+ * @param {number} [o.scoreMin]
+ */
+export function trieParPlancher({ soumises = [], jobs = [], scoreMin = SCORE_MINIMUM }) {
+  const gardes = [];
+  const nonRetenues = [];
+  const cites = new Set();
+
+  for (const j of jobs) {
+    const id = txt(j?.jobId);
+    if (!id) continue;
+    cites.add(id);
+    // ATTENTION : `Number(null)` vaut 0, pas NaN. Tester `Number(j.score)`
+    // directement classerait un score ABSENT comme un score de 0, donc sous
+    // n'importe quel plancher. C'est le même piège qui a affiché un badge « 0 »
+    // sur une offre ajoutée à la main le 2026-08-10, et il apparaît une troisième
+    // fois dans ce code : on écarte donc null/undefined/"" AVANT de convertir.
+    const nul = j?.score === null || j?.score === undefined || j?.score === "";
+    const s = nul ? NaN : Number(j.score);
+    // Un score ABSENT n'est pas un score bas. Sans note on ne peut pas juger, et
+    // jeter par défaut ferait disparaître l'offre en silence — exactement le
+    // genre de perte qu'on ne voit qu'en relisant le journal six semaines après.
+    if (!Number.isFinite(s) || s >= scoreMin) {
+      gardes.push(j);
+    } else {
+      nonRetenues.push({ jobId: id, title: txt(j?.title), score: s, raison: `score ${s} sous le plancher ${scoreMin}` });
+    }
+  }
+
+  for (const o of soumises) {
+    const id = txt(o?.jobId);
+    if (!id || cites.has(id)) continue;
+    nonRetenues.push({ jobId: id, title: txt(o?.title), score: null, raison: "non citee par le tri" });
+  }
+
+  return { gardes, nonRetenues };
+}
+
+/**
  * Construit le prompt de tri.
  *
  * Les critères ne sont PAS écrits ici : ils viennent de portals.yml (les 42
@@ -253,7 +328,7 @@ export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus, mots
  * propres critères deviendrait une deuxième source de vérité, exactement le
  * problème qu'on vient de supprimer côté recherche.
  */
-export function promptRank({ offres, filtres = {}, profil = "", maxRetenues = 5 }) {
+export function promptRank({ offres, filtres = {}, profil = "", maxRetenues = 5, scoreMin = SCORE_MINIMUM }) {
   const positive = (filtres.positive ?? []).join(", ");
   const lieuOk = [...(filtres.alwaysAllow ?? []), ...(filtres.allow ?? [])].join(", ");
   const lieuNon = (filtres.block ?? []).join(", ");
@@ -295,10 +370,15 @@ export function promptRank({ offres, filtres = {}, profil = "", maxRetenues = 5 
     "- Ce que le profil ne dit pas, le candidat ne le sait pas. Ne comble aucun trou.",
     "",
     "REGLES",
-    "- Garde jusqu'a " + maxRetenues + " offres. Ce n'est PAS une preselection serree :",
-    "  c'est le candidat qui tranche ensuite, offre par offre. N'ecarte donc que ce",
-    "  qui est VRAIMENT inutilisable pour lui, et garde le reste avec son score,",
-    "  meme moyen. Un doute se resout en GARDANT l'offre, pas en la supprimant.",
+    "- " + maxRetenues + " est un PLAFOND, pas un quota. Ne le remplis pas.",
+    "  S'il n'y a que 12 offres qui valent la peine, rends-en 12. Rendre une offre",
+    "  faible pour atteindre le nombre est le pire resultat possible : le candidat",
+    "  perd son temps a la lire, et elle repousse une bonne offre hors de la liste.",
+    "- N'inclus AUCUNE offre que tu noterais en dessous de " + scoreMin + ". Elle sera",
+    "  jetee de toute facon, et l'avoir redigee n'aura servi qu'a allonger le tri.",
+    "- Entre ces deux bornes, ne presélectionne pas serre : c'est le candidat qui",
+    "  tranche, offre par offre. Une offre plausible mais moyenne se garde avec son",
+    "  score honnete ; un doute sur une offre PLAUSIBLE se resout en la gardant.",
     "- Ce qui justifie d'ECARTER, et rien d'autre :",
     "  1. hors sujet : le poste n'a aucun rapport avec ce que le candidat cherche ;",
     "  2. lieu refuse ;",

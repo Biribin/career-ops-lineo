@@ -22,6 +22,7 @@ import {
   prepareLot,
   promptRank,
   scorePertinence,
+  trieParPlancher,
 } from "../../src/lib/rank.mjs";
 
 const offreFT = (id, over = {}) => ({
@@ -205,6 +206,75 @@ test("cibleesGardees mesure ce que la troncature a réellement retenu", () => {
   const bruit = [...Array(5)].map((_, i) => offreFT(`B${i}`, { intitule: "Conducteur de ligne", description: "x" }));
   const lot = prepareLot([...bruit, ...cibles], { maxOffres: 3, motsCles: CLES });
   assert.equal(lot.cibleesGardees, 3, "les 3 places doivent aller aux 3 offres ciblées");
+});
+
+// -- Plancher de score et memoire du bruit ------------------------------------
+//
+// Decision de Lineo : « s'il n'y a pas de bonne offre, pas obligé d'aller jusqu'à
+// 60 ». Et : une offre deja jugee comme du bruit ne doit plus etre reexaminee.
+
+test("le plafond de retenues n'est pas un quota, et le prompt le dit", () => {
+  const p = promptRank({ offres: [normaliseOffre(offreFT("A"))], filtres: {}, maxRetenues: 60, scoreMin: 40 });
+  assert.ok(/PLAFOND, pas un quota/.test(p));
+  assert.ok(/Ne le remplis pas/.test(p));
+  assert.ok(/en dessous de 40/.test(p), "le plancher doit etre annonce au modele");
+});
+
+test("une offre sous le plancher n'entre pas dans la file, et sort en nonRetenues", () => {
+  const soumises = [normaliseOffre(offreFT("BON")), normaliseOffre(offreFT("FAIBLE"))];
+  const jobs = [
+    { jobId: "BON", title: "Ingénieur automatisation", score: 70 },
+    { jobId: "FAIBLE", title: "Data Scientist", score: 20 },
+  ];
+  const { gardes, nonRetenues } = trieParPlancher({ soumises, jobs, scoreMin: 40 });
+  assert.deepEqual(
+    gardes.map((j) => j.jobId),
+    ["BON"],
+  );
+  assert.equal(nonRetenues.length, 1);
+  assert.equal(nonRetenues[0].jobId, "FAIBLE");
+  assert.match(nonRetenues[0].raison, /sous le plancher 40/, "la raison doit etre lisible dans le journal");
+});
+
+test("les offres soumises que le modèle n'a PAS citées sont mémorisées aussi", () => {
+  // Le vrai gisement de bruit : 90 offres sur 150 le 2026-08-10. Sans trace, elles
+  // reviennent chaque jour se refaire juger a l'identique.
+  const soumises = [normaliseOffre(offreFT("A")), normaliseOffre(offreFT("B")), normaliseOffre(offreFT("C"))];
+  const jobs = [{ jobId: "A", title: "x", score: 80 }];
+  const { gardes, nonRetenues } = trieParPlancher({ soumises, jobs, scoreMin: 40 });
+  assert.equal(gardes.length, 1);
+  assert.deepEqual(nonRetenues.map((o) => o.jobId).sort(), ["B", "C"]);
+  for (const o of nonRetenues) {
+    assert.equal(o.score, null, "une offre non citee n'a PAS de score, et null le dit");
+    assert.match(o.raison, /non citee/);
+  }
+});
+
+test("un score ABSENT ne vaut pas un score bas : l'offre est gardée", () => {
+  // Jeter par defaut ferait disparaitre l'offre en silence — la perte qu'on ne
+  // voit qu'en relisant le journal six semaines plus tard.
+  const soumises = [normaliseOffre(offreFT("A"))];
+  const { gardes, nonRetenues } = trieParPlancher({ soumises, jobs: [{ jobId: "A", score: null }], scoreMin: 40 });
+  assert.equal(gardes.length, 1);
+  assert.equal(nonRetenues.length, 0);
+});
+
+test("un plancher à 0 laisse tout passer : le mécanisme est débrayable", () => {
+  const soumises = [normaliseOffre(offreFT("A"))];
+  const { gardes } = trieParPlancher({ soumises, jobs: [{ jobId: "A", score: 5 }], scoreMin: 0 });
+  assert.equal(gardes.length, 1);
+});
+
+test("aucune offre au-dessus du plancher : file vide, et TOUT est mémorisé", () => {
+  // Le cas que Lineo a demande : une tournee peut legitimement ne rien rapporter.
+  const soumises = [normaliseOffre(offreFT("A")), normaliseOffre(offreFT("B"))];
+  const jobs = [
+    { jobId: "A", score: 25 },
+    { jobId: "B", score: 30 },
+  ];
+  const { gardes, nonRetenues } = trieParPlancher({ soumises, jobs, scoreMin: 40 });
+  assert.equal(gardes.length, 0, "mieux vaut zero offre qu'une mauvaise");
+  assert.equal(nonRetenues.length, 2, "et les deux doivent etre memorisees");
 });
 
 test("le champ interne de classement ne fuit JAMAIS vers le prompt", () => {
