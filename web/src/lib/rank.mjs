@@ -22,8 +22,16 @@
 // « oublie » silencieusement la moitié du lot. On borne donc explicitement, et on
 // DIT ce qu'on a écarté.
 
-/** Au-delà, le prompt devient ingérable pour un seul appel. */
-export const MAX_OFFRES = 60;
+/**
+ * Au-delà, le prompt devient ingérable pour un seul appel.
+ *
+ * Relevé de 60 à 150 le 2026-08-10 : avec `max_urls: 12`, la chaîne ne ramenait
+ * que 33 offres brutes (16 après dédoublonnage), et 60 n'a jamais mordu. Une
+ * fois `max_urls` ouvert, c'est ce plafond-ci qui devient le goulot. 150 offres
+ * à MAX_DESCRIPTION près, c'est ~135 000 caractères de prompt : gros mais dans
+ * ce qu'un seul appel encaisse, et le nœud n8n a 290 s de timeout pour ça.
+ */
+export const MAX_OFFRES = 150;
 /** Assez pour juger la pertinence, sans recopier l'annonce entière. */
 export const MAX_DESCRIPTION = 700;
 

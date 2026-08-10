@@ -119,17 +119,29 @@ export function motsClesFranceTravail(positive = [], enPlus = []) {
   }
 
   // Les requêtes de config passent en tête : ce sont celles que Linéo a écrites
-  // explicitement, elles doivent survivre à un éventuel plafond.
+  // explicitement, elles doivent survivre au plafond `max_urls`.
+  //
+  // L'ordre du YAML est PRÉSERVÉ, et ce n'est pas cosmétique : il fixe l'ordre
+  // des requêtes, donc celui des offres agrégées, donc lesquelles remplissent le
+  // lot que `prepareLot` tronque à MAX_OFFRES avant le tri. Un `unshift` par mot
+  // inversait la liste — le DERNIER mot-clé du fichier partait en premier, et
+  // les mieux ciblés se faisaient jeter par le plafond.
+  const tete = [];
   for (const mot of enPlus) {
     const m = String(mot ?? "").trim();
     if (!m) continue;
     const cle = norm(m);
     if (vus.has(cle)) {
-      retenus.splice(retenus.findIndex((r) => norm(r) === cle), 1);
+      // Déjà présent : soit il vient de `positive` (on le retire pour le
+      // repositionner en tête), soit il est déjà en tête (on ne le double pas).
+      const i = retenus.findIndex((r) => norm(r) === cle);
+      if (i !== -1) retenus.splice(i, 1);
+      if (tete.some((r) => norm(r) === cle)) continue;
     }
     vus.add(cle);
-    retenus.unshift(m);
+    tete.push(m);
   }
+  retenus.unshift(...tete);
 
   return { retenus, traduits, ecartes };
 }
