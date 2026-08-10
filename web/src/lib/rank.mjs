@@ -22,8 +22,26 @@
 // « oublie » silencieusement la moitié du lot. On borne donc explicitement, et on
 // DIT ce qu'on a écarté.
 
-/** Au-delà, le prompt devient ingérable pour un seul appel. */
-export const MAX_OFFRES = 60;
+/**
+ * Le nombre d'offres soumises au modèle en un seul appel.
+ *
+ * Porté de 60 à 150 le 2026-08-10, sur mesure de la tournée réelle : 941 offres
+ * brutes, 659 uniques et neuves, dont 60 seulement atteignaient le tri. Les 599
+ * autres étaient écartées par ce plafond, sans qu'aucun critère de pertinence
+ * n'intervienne — Linéo recevait donc les premières arrivées, pas les meilleures.
+ *
+ * Mesuré, pas estimé : 150 offres à MAX_DESCRIPTION près font un prompt de
+ * ~148 000 caractères (~37 k tokens), contre ~63 000 à 60 offres. Le CLI est
+ * coupé à 280 s, le nœud n8n à 290 s et la route à 300 s : si un appel à 150
+ * dépasse ce budget, c'est ce plafond qu'il faut redescendre, pas le timeout.
+ *
+ * Ce que ce plafond NE règle pas : il tronque dans l'ordre d'arrivée, donc dans
+ * l'ordre des requêtes. Ce sont les premiers mots-clés de `france_travail` qui
+ * remplissent les 150 places — d'où l'importance de les ranger du plus ciblé au
+ * plus large. Le reste n'est pas perdu pour autant : le filtre `dejaVus` écarte
+ * à la tournée suivante ce qui a déjà été vu, et la tranche suivante remonte.
+ */
+export const MAX_OFFRES = 150;
 /** Assez pour juger la pertinence, sans recopier l'annonce entière. */
 export const MAX_DESCRIPTION = 700;
 
