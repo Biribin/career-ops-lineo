@@ -113,17 +113,31 @@ function lanceUneFois(
   // Tous les outils coupés : le prompt contient déjà tout le contexte, le modèle
   // n'a qu'à répondre. Un agent qui lirait des fichiers ou ferait des recherches
   // web ici serait lent et imprévisible.
-  const args =
-    cliId === CLI_DEFAUT
-      ? [
-          "-p",
-          prompt,
-          "--permission-mode",
-          "acceptEdits",
-          "--disallowedTools",
-          "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Read,Glob,Grep",
-        ]
-      : spec.args(prompt);
+  //
+  // LE PROMPT PART SUR STDIN, JAMAIS EN ARGUMENT
+  // -------------------------------------------
+  // Linux plafonne UN argument à 128 Ko (MAX_ARG_STRLEN = 32 pages), et ce
+  // plafond est indépendant d'ARG_MAX (2 Mo dans le conteneur). Au-delà, `spawn`
+  // échoue en E2BIG avant même de lancer le binaire.
+  //
+  // Reproduit le 2026-08-10 dans le conteneur career-ops : un prompt de 148 000
+  // caractères passé en `-p <prompt>` rend E2BIG, le même sur stdin passe. C'est
+  // exactement ce qui cassait la tournée depuis que MAX_OFFRES est monté à 150 :
+  // 150 offres font ~148 Ko de prompt, /api/rank rendait « spawn E2BIG » en 500,
+  // et la tournée n'enregistrait rien. À 60 offres (~63 Ko) le plafond ne mordait
+  // pas, d'où un bug invisible jusqu'au passage en France entière.
+  //
+  // `claude -p` sans prompt positionnel lit stdin : vérifié dans le conteneur.
+  const surStdin = cliId === CLI_DEFAUT;
+  const args = surStdin
+    ? [
+        "-p",
+        "--permission-mode",
+        "acceptEdits",
+        "--disallowedTools",
+        "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Read,Glob,Grep",
+      ]
+    : spec.args(prompt);
 
   return new Promise<Essai>((resolve) => {
     let child;
@@ -132,6 +146,14 @@ function lanceUneFois(
     } catch (e) {
       resolve({ ok: false, message: e instanceof Error ? e.message : "spawn a échoué", status: 500, plafond: false });
       return;
+    }
+
+    if (surStdin) {
+      // EPIPE si le CLI ferme son entrée avant qu'on ait fini d'écrire (cas du
+      // plafond de quota, qui répond immédiatement). Ce n'est pas une panne :
+      // la sortie est lue normalement et `estPlafond` la reconnaîtra.
+      child.stdin.on("error", () => {});
+      child.stdin.end(prompt, "utf8");
     }
 
     let out = "";
