@@ -499,8 +499,9 @@ export async function POST(req: Request) {
                   "Ce traitement n'a produit aucun CV adapté — le CV d'origine n'a pas été modifié. Relancez-le pour vérifier.",
                 );
               }
-              // Les quatre vérifications déterministes (clé perdue, date réécrite,
-              // ancienneté inventée, volume anormal) : un prompt se contourne, elles non.
+              // Les cinq vérifications déterministes (clé perdue, date réécrite,
+              // ancienneté introduite, volume anormal, débordement sur une deuxième
+              // page) : un prompt se contourne, elles non.
               const verdict = verifieCvAdapte({ original: cvYamlOriginal, adapte: rendu });
               if (!verdict.ok) return fail(`CV adapté refusé : ${verdict.motif}`);
               for (const w of verdict.avertissements) send({ type: "text", text: `⚠️ ${w}\n` });
