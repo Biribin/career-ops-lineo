@@ -494,16 +494,38 @@ export async function POST(req: Request) {
               } catch {
                 rendu = "";
               }
-              if (!rendu.trim() || !cleanExit || sawError) {
+              // Un fichier vide, c'est un echec : il n'y a rien a verifier.
+              if (!rendu.trim()) {
                 return fail(
                   "Ce traitement n'a produit aucun CV adapté — le CV d'origine n'a pas été modifié. Relancez-le pour vérifier.",
                 );
               }
-              // Les cinq vérifications déterministes (clé perdue, date réécrite,
-              // ancienneté introduite, volume anormal, débordement sur une deuxième
-              // page) : un prompt se contourne, elles non.
+              // `cleanExit` et `sawError` NE decident PLUS ici, et c'est le coeur du
+              // correctif du 2026-08-10.
+              //
+              // Ce qu'il s'est passe. Claude Code a fait le travail, deux fois, et
+              // rendu « VERDICT: 5/5 — coupe paie/DSN/projets redondants, sous
+              // budget », un CV conforme de ~4 600 caracteres. Les deux tentatives
+              // ont ete jetees, puis Gemini a echoue sur son quota, et l'alerte n'a
+              // montre que le quota Gemini. Cause : `sawError` vient d'une regex sur
+              // stderr qui contient `auth`, `error` et `not found` en SOUS-CHAINE.
+              // « author », « Authorization », un message d'outil « not found » —
+              // n'importe quel mot anodin sur stderr suffisait a tout annuler.
+              //
+              // Pourquoi c'est le bon sens de la correction. On dispose ici d'un juge
+              // bien meilleur que du texte sur stderr : l'artefact lui-meme, passe au
+              // crible de cinq verifications deterministes. Si elles passent, le CV
+              // est bon, quoi que le CLI ait murmure au passage. C'est exactement la
+              // doctrine deja ecrite dans cv-adapt.mjs : un prompt se contourne, une
+              // verification non.
+              //
+              // Les anomalies ne sont pas perdues pour autant : elles remontent en
+              // avertissement, pour qu'un vrai probleme reste visible sans annuler un
+              // travail verifie.
               const verdict = verifieCvAdapte({ original: cvYamlOriginal, adapte: rendu });
               if (!verdict.ok) return fail(`CV adapté refusé : ${verdict.motif}`);
+              if (!cleanExit) send({ type: "text", text: "⚠️ Le CLI s'est arrêté sur un code non nul, mais le CV rendu passe les cinq vérifications : il est retenu.\n" });
+              if (sawError) send({ type: "text", text: "⚠️ Un message d'erreur est apparu sur la sortie d'erreur du CLI, mais le CV rendu passe les cinq vérifications : il est retenu.\n" });
               for (const w of verdict.avertissements) send({ type: "text", text: `⚠️ ${w}\n` });
               // L'artefact EST le résultat : n8n lit cet évènement et rien d'autre.
               send({ type: "artifact", artifact: "cv-yaml", adaptedYaml: verdict.adaptedYaml });
