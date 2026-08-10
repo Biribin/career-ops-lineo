@@ -18,16 +18,20 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
   const isAi = mode === "ai";
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
+  // Offres ecartees pendant cette session : l'API les a deja marquees dans
+  // scan-history.tsv, mais la liste courante vient d'un scan en direct et ne se
+  // recharge pas, donc on les retire ici aussi.
+  const [ecartees, setEcartees] = useState<Set<string>>(new Set());
 
   const view = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    let list = offers;
+    let list = offers.filter((o) => !ecartees.has(o.url));
     if (needle) list = list.filter((o) => o.title.toLowerCase().includes(needle) || o.company.toLowerCase().includes(needle));
     const sorted = [...list].sort((a, b) =>
       sort === "fresh" ? (b.postedAt || "").localeCompare(a.postedAt || "") : a.company.localeCompare(b.company),
     );
     return sorted;
-  }, [offers, q, sort]);
+  }, [offers, q, sort, ecartees]);
 
   const addable = offers.filter((o) => !o.inPipeline && !o.evaluatedN && !added.has(o.url));
 
@@ -83,7 +87,13 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {view.map((o) => (
-          <DiscoveryCard key={o.url} offer={o} inPipeline={o.inPipeline} evaluatedN={o.evaluatedN} />
+          <DiscoveryCard
+            key={o.url}
+            offer={o}
+            inPipeline={o.inPipeline}
+            evaluatedN={o.evaluatedN}
+            onDismiss={(url) => setEcartees((s) => new Set(s).add(url))}
+          />
         ))}
       </div>
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { ApplyBackdrop } from "@/components/apply/apply-backdrop";
 import { instrumentSerif } from "@/lib/fonts";
@@ -24,6 +25,8 @@ html.dark .co-ailedger{color:hsl(26 86% 67%)}
 `;
 
 export function AiHuntView({ cliName }: { cliName?: string }) {
+  // Offres ecartees pendant cette session : voir le commentaire dans results-list.
+  const [ecartees, setEcartees] = useState<Set<string>>(new Set());
   const { phase, matchCount, aiTrace, aiCost, offers } = useExplore();
   const shown = useCountUp(matchCount);
   const revealing = phase === "revealing";
@@ -60,8 +63,13 @@ export function AiHuntView({ cliName }: { cliName?: string }) {
 
         {offers.length > 0 && (
           <div className="mt-2 grid w-full max-w-4xl gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {offers.map((o) => (
-              <DiscoveryCard key={o.url} offer={o} inPipeline={false} />
+            {offers.filter((o) => !ecartees.has(o.url)).map((o) => (
+              <DiscoveryCard
+                key={o.url}
+                offer={o}
+                inPipeline={false}
+                onDismiss={(url) => setEcartees((s) => new Set(s).add(url))}
+              />
             ))}
           </div>
         )}

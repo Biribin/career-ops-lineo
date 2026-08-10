@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins } from "lucide-react";
+import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
@@ -39,9 +39,22 @@ function Logo({ company }: { company: string }) {
 // Les CLÉS sont les identifiants de `kind` des traitements — jamais traduites.
 const WORKER_LABEL: Record<string, string> = { evaluate: "Évaluation…", pdf: "Préparation du CV…", research: "Recherche…", apply: "Remplissage…" };
 
-export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: DiscoveredOffer; inPipeline: boolean; evaluatedN?: string }) {
+export function DiscoveryCard({
+  offer,
+  inPipeline,
+  evaluatedN,
+  onDismiss,
+}: {
+  offer: DiscoveredOffer;
+  inPipeline: boolean;
+  evaluatedN?: string;
+  // Fourni par les surfaces qui affichent une LISTE d'offres : la carte prévient le
+  // parent pour qu'il la retire tout de suite, sans attendre un rechargement.
+  onDismiss?: (url: string) => void;
+}) {
   const { added, adding, addToPipeline } = useExplore();
   const { jobs, startJob } = useJobs();
+  const [dismissing, setDismissing] = useState(false);
 
   // GLOBAL worker awareness: any worker acting on this URL drives the CTA, here
   // and on every other surface that renders this offer (the jobs store is global).
@@ -61,6 +74,31 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   const evaluate = () => {
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it
     startJob({ title: `Évaluation · ${offer.company}`, subtitle: offer.title, kind: "evaluate", input: offer.url, page: "/explore" });
+  };
+
+  // Écarter pour de bon : l'API écrit `skipped` dans scan-history.tsv, que
+  // /api/whats-new ignore déjà. L'offre ne reviendra pas, même si une prochaine
+  // tournée la retrouve. On retire la carte tout de suite et on n'annule pas en cas
+  // d'échec réseau : réafficher une offre que l'utilisateur vient de balayer est plus
+  // agaçant que de la voir revenir au prochain chargement.
+  const dismiss = async () => {
+    setDismissing(true);
+    onDismiss?.(offer.url);
+    try {
+      await fetch("/api/whats-new/dismiss", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          url: offer.url,
+          portal: offer.ats,
+          title: offer.title,
+          company: offer.company,
+          location: offer.location,
+        }),
+      });
+    } catch {
+      // silencieux, voir le commentaire ci-dessus
+    }
   };
 
   return (
@@ -147,6 +185,18 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
             >
               Évaluer <Coins className="size-3.5 opacity-80" />
             </button>
+            {onDismiss && (
+              <button
+                type="button"
+                onClick={dismiss}
+                disabled={dismissing}
+                title="Écarter — elle ne reviendra pas, même si une prochaine tournée la retrouve"
+                aria-label="Écarter cette offre"
+                className="inline-flex shrink-0 items-center justify-center rounded-md border border-border px-2 py-2 text-faint transition-colors hover:border-red-500/40 hover:text-red-500 disabled:opacity-50 max-sm:min-h-[44px] max-sm:min-w-[44px]"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
           </div>
         )}
       </div>

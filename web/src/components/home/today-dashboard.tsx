@@ -144,7 +144,12 @@ export function TodayDashboard({
         <Section icon={Sparkles} title="Nouvelles offres cette semaine" hint="Trouvées par vos scans gratuits · 0 jeton">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {fresh.slice(0, 6).map((o) => (
-              <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
+              <DiscoveryCard
+                key={o.url}
+                offer={o}
+                inPipeline={inboxUrls.has(o.url)}
+                onDismiss={(url) => setFresh((l) => l.filter((x) => x.url !== url))}
+              />
             ))}
           </div>
           {fresh.length > 6 && (
