@@ -1,5 +1,6 @@
 import { erreurOpenAi, executeLlm } from "@/lib/llm-runner";
 import { lireFiltresPortals } from "@/lib/core/portals";
+import { litJournalOffres } from "@/lib/offers-journal";
 import { MAX_OFFRES, parseRank, prepareLot, promptRank } from "@/lib/rank.mjs";
 import { profilCv } from "@/lib/profil-cv";
 
@@ -41,11 +42,30 @@ export async function POST(req: Request) {
     });
   }
 
-  const lot = prepareLot(brutes, { maxOffres: MAX_OFFRES });
+  // Tout jobId déjà au journal est écarté, quel que soit son statut : en attente
+  // de décision, partie en rédaction, ou écartée. Une offre sur laquelle Linéo
+  // s'est déjà prononcé n'a rien à faire dans un lot de découverte.
+  //
+  // Le journal est lu ICI et pas reçu de n8n : c'est career-ops qui l'écrit, lui
+  // seul en connaît l'état au moment du tri. Le faire porter par le workflow
+  // recréerait la deuxième source de vérité qu'on a supprimée côté recherche.
+  const dejaVus = new Set(
+    litJournalOffres()
+      .map((l) => String(l.jobId ?? "").trim())
+      .filter(Boolean),
+  );
+
+  const lot = prepareLot(brutes, { maxOffres: MAX_OFFRES, dejaVus });
   if (lot.offres.length === 0) {
     return Response.json({
       jobs: [],
-      lot: { envoyees: 0, doublons: lot.doublons, sansId: lot.sansId, tronquees: lot.tronquees },
+      lot: {
+        envoyees: 0,
+        doublons: lot.doublons,
+        sansId: lot.sansId,
+        dejaVues: lot.dejaVues,
+        tronquees: lot.tronquees,
+      },
       inventes: [],
       vide: true,
     });
@@ -84,6 +104,7 @@ export async function POST(req: Request) {
       envoyees: lot.offres.length,
       doublons: lot.doublons,
       sansId: lot.sansId,
+      dejaVues: lot.dejaVues,
       tronquees: lot.tronquees,
     },
     // Un jobId que le modèle aurait inventé : écarté, mais signalé.

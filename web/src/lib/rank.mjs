@@ -22,16 +22,8 @@
 // « oublie » silencieusement la moitié du lot. On borne donc explicitement, et on
 // DIT ce qu'on a écarté.
 
-/**
- * Au-delà, le prompt devient ingérable pour un seul appel.
- *
- * Relevé de 60 à 150 le 2026-08-10 : avec `max_urls: 12`, la chaîne ne ramenait
- * que 33 offres brutes (16 après dédoublonnage), et 60 n'a jamais mordu. Une
- * fois `max_urls` ouvert, c'est ce plafond-ci qui devient le goulot. 150 offres
- * à MAX_DESCRIPTION près, c'est ~135 000 caractères de prompt : gros mais dans
- * ce qu'un seul appel encaisse, et le nœud n8n a 290 s de timeout pour ça.
- */
-export const MAX_OFFRES = 150;
+/** Au-delà, le prompt devient ingérable pour un seul appel. */
+export const MAX_OFFRES = 60;
 /** Assez pour juger la pertinence, sans recopier l'annonce entière. */
 export const MAX_DESCRIPTION = 700;
 
@@ -90,12 +82,26 @@ export function normaliseOffre(o) {
  * mangées par la même offre remontée par plusieurs requêtes de mots-clés
  * différents, ce qui est le cas courant (« n8n » et « automatisation » ramènent
  * largement les mêmes annonces).
+ *
+ * `dejaVus` porte les jobId que Linéo a DÉJÀ dans son journal, quel que soit
+ * leur statut : en attente de décision, partie en rédaction, ou écartée. Ces
+ * offres étaient jusqu'ici retéléchargées, renotées et restockées à chaque
+ * tournée. `etatCourant` les masquait ensuite à l'affichage, si bien que le
+ * symptôme visible n'était pas « une offre revient » mais « la tournée ne
+ * rapporte rien » : les 60 places du lot et l'appel LLM partaient sur des
+ * annonces déjà tranchées. Les écarter ICI, avant le plafond ET avant le
+ * modèle, est ce qui rend chaque tournée réellement neuve.
+ *
+ * @param {unknown[]} offresBrutes
+ * @param {{ maxOffres?: number, dejaVus?: Set<string> | string[] }} [opts]
  */
-export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES } = {}) {
+export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus } = {}) {
+  const connus = dejaVus instanceof Set ? dejaVus : new Set(Array.isArray(dejaVus) ? dejaVus.map(txt) : []);
   const vues = new Set();
   /** @type {Array<ReturnType<typeof normaliseOffre>>} */
   const offres = [];
   let sansId = 0;
+  let dejaVues = 0;
 
   for (const brut of Array.isArray(offresBrutes) ? offresBrutes : []) {
     const o = normaliseOffre(brut);
@@ -105,14 +111,24 @@ export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES } = {}) {
     }
     if (vues.has(o.jobId)) continue;
     vues.add(o.jobId);
+    if (connus.has(o.jobId)) {
+      dejaVues += 1;
+      continue;
+    }
     offres.push(o);
   }
 
   const gardees = offres.slice(0, maxOffres);
   return {
     offres: gardees,
-    doublons: (Array.isArray(offresBrutes) ? offresBrutes.length : 0) - offres.length - sansId,
+    // `doublons` reste ce qu'il a toujours mesuré — la même annonce ramenée par
+    // plusieurs requêtes de la MÊME tournée. Les offres connues d'une tournée
+    // précédente sont comptées à part : mélanger les deux rendrait impossible de
+    // savoir si une tournée maigre vient de requêtes redondantes ou d'un
+    // gisement épuisé.
+    doublons: (Array.isArray(offresBrutes) ? offresBrutes.length : 0) - offres.length - sansId - dejaVues,
     sansId,
+    dejaVues,
     tronquees: offres.length - gardees.length,
   };
 }

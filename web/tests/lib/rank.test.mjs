@@ -69,6 +69,44 @@ test("la déduplication passe AVANT le plafond", () => {
   assert.ok(lot.doublons > 0);
 });
 
+test("une offre déjà au journal ne repart JAMAIS au tri", () => {
+  // Le symptôme que Linéo constatait : la tournée « ne rapporte rien ». Les
+  // offres déjà tranchees remontaient de France Travail, mangeaient les places
+  // du lot et l'appel LLM, puis etaient masquees a l'affichage par etatCourant.
+  const brutes = [offreFT("VU-1"), offreFT("VU-2"), offreFT("NEUVE")];
+  const lot = prepareLot(brutes, { dejaVus: new Set(["VU-1", "VU-2"]) });
+  assert.deepEqual(
+    lot.offres.map((o) => o.jobId),
+    ["NEUVE"],
+  );
+  assert.equal(lot.dejaVues, 2, "le compte doit etre annonce, pas silencieux");
+  assert.equal(lot.doublons, 0, "deja vue n'est pas un doublon de tournee");
+});
+
+test("les offres déjà vues ne mangent pas les places du plafond", () => {
+  // Sans ce comportement, une file de 60 offres connues suffisait a evincer les
+  // offres neuves : le plafond se remplissait avant de les atteindre.
+  const connues = [...Array(MAX_OFFRES)].map((_, i) => `VU${i}`);
+  const brutes = connues.map((id) => offreFT(id)).concat([...Array(3)].map((_, i) => offreFT(`N${i}`)));
+  const lot = prepareLot(brutes, { dejaVus: new Set(connues) });
+  assert.equal(lot.offres.length, 3);
+  assert.equal(lot.tronquees, 0);
+});
+
+test("dejaVus accepte un tableau autant qu'un Set", () => {
+  const lot = prepareLot([offreFT("A"), offreFT("B")], { dejaVus: ["A"] });
+  assert.deepEqual(
+    lot.offres.map((o) => o.jobId),
+    ["B"],
+  );
+});
+
+test("sans dejaVus, rien ne change pour les appelants existants", () => {
+  const lot = prepareLot([offreFT("A"), offreFT("B")]);
+  assert.equal(lot.offres.length, 2);
+  assert.equal(lot.dejaVues, 0);
+});
+
 test("le plafond d'offres est appliqué ET annoncé", () => {
   const brutes = [...Array(MAX_OFFRES + 12)].map((_, i) => offreFT(`ID${i}`));
   const lot = prepareLot(brutes);
