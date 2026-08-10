@@ -123,3 +123,6 @@ plan/
 # (see DATA_CONTRACT.md). Re-include them past the unanchored user-layer
 # patterns above (cv.md, portals.yml).
 !test-fixtures/**
+
+# Journal de la synchronisation de couche utilisateur : noms de fichiers personnels.
+deploy/sync-user-layer.log
