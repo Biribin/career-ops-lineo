@@ -1,5 +1,5 @@
 import { erreurOpenAi, executeLlm } from "@/lib/llm-runner";
-import { lireFiltresPortals } from "@/lib/core/portals";
+import { lireFiltresPortals, motsClesFranceTravail } from "@/lib/core/portals";
 import { litJournalOffres } from "@/lib/offers-journal";
 import { MAX_OFFRES, parseRank, prepareLot, promptRank } from "@/lib/rank.mjs";
 import { profilCv } from "@/lib/profil-cv";
@@ -58,7 +58,16 @@ export async function POST(req: Request) {
       .filter(Boolean),
   );
 
-  const lot = prepareLot(brutes, { maxOffres: MAX_OFFRES, dejaVus });
+  const filtres = lireFiltresPortals();
+
+  // Les mots-clés servent à CLASSER le lot avant de le tronquer, pas à filtrer.
+  // Même source que la recherche — portals.yml — pour qu'on ne puisse pas
+  // chercher sur un jeu de termes et classer sur un autre.
+  const lot = prepareLot(brutes, {
+    maxOffres: MAX_OFFRES,
+    dejaVus,
+    motsCles: [...filtres.positive, ...motsClesFranceTravail()],
+  });
   if (lot.offres.length === 0) {
     return Response.json({
       jobs: [],
@@ -67,6 +76,7 @@ export async function POST(req: Request) {
         doublons: lot.doublons,
         sansId: lot.sansId,
         dejaVues: lot.dejaVues,
+        alternances: lot.alternances,
         tronquees: lot.tronquees,
       },
       inventes: [],
@@ -74,7 +84,6 @@ export async function POST(req: Request) {
     });
   }
 
-  const filtres = lireFiltresPortals();
   // Plafonné par la taille du lot, pas par une constante arbitraire : on ne peut
   // pas retenir plus d'offres qu'on n'en a envoyées au modèle. L'ancien plafond
   // dur à 20 empêchait Linéo de demander la tournée qu'il veut — voir 60
@@ -115,7 +124,12 @@ export async function POST(req: Request) {
       doublons: lot.doublons,
       sansId: lot.sansId,
       dejaVues: lot.dejaVues,
+      alternances: lot.alternances,
       tronquees: lot.tronquees,
+      // Sur les offres envoyées au modèle, combien portent un mot-clé dans leur
+      // intitulé. C'est le seul chiffre qui dit si la troncature garde les bonnes
+      // offres : avant le classement il dépendait de l'ordre des requêtes.
+      cibleesGardees: lot.cibleesGardees,
     },
     // Un jobId que le modèle aurait inventé : écarté, mais signalé.
     inventes: resultat.inventes,

@@ -15,11 +15,13 @@ import assert from "node:assert/strict";
 import {
   MAX_DESCRIPTION,
   MAX_OFFRES,
+  clesNormalisees,
   lieuLisible,
   normaliseOffre,
   parseRank,
   prepareLot,
   promptRank,
+  scorePertinence,
 } from "../../src/lib/rank.mjs";
 
 const offreFT = (id, over = {}) => ({
@@ -118,6 +120,98 @@ test("une offre sans identifiant est écartée et comptée", () => {
   const lot = prepareLot([offreFT("A"), { intitule: "sans id" }]);
   assert.equal(lot.offres.length, 1);
   assert.equal(lot.sansId, 1);
+});
+
+// -- Classement par pertinence avant troncature -------------------------------
+//
+// Le bug réel : en France entière, 1 161 offres distinctes arrivent, 150 partent
+// au modèle, et ces 150 venaient d'UN SEUL mot-clé sur 33 parce que la troncature
+// se faisait dans l'ordre d'arrivée. Les offres ciblées des requêtes suivantes
+// n'atteignaient jamais le tri.
+
+const CLES = ["automatisation", "n8n", "intelligence artificielle", "python"];
+
+test("le titre qui porte un mot-clé passe AVANT celui qui ne l'a que dans la description", () => {
+  const horsSujet = offreFT("BRUIT", {
+    intitule: "Conducteur de ligne",
+    description: "Atelier avec automatisation des convoyeurs.",
+  });
+  const cible = offreFT("CIBLE", { intitule: "Ingénieur automatisation", description: "Rien de plus." });
+  // volontairement dans le MAUVAIS ordre d'arrivée
+  const lot = prepareLot([horsSujet, cible], { maxOffres: 1, motsCles: CLES });
+  assert.deepEqual(
+    lot.offres.map((o) => o.jobId),
+    ["CIBLE"],
+    "la troncature doit garder l'offre du métier, pas la première arrivée",
+  );
+  assert.equal(lot.tronquees, 1);
+});
+
+test("les accents et la casse ne font pas rater un mot-clé", () => {
+  const o = offreFT("A", { intitule: "INGENIEUR Intelligence Artificielle", description: "x" });
+  assert.ok(scorePertinence(normaliseOffre(o), clesNormalisees(["Intelligence Artificielle"])) >= 4);
+});
+
+test("à score égal, l'ordre d'arrivée est conservé — la priorité du YAML survit", () => {
+  // Les deux ont un mot-clé dans le titre : rien ne doit les réordonner, sinon la
+  // priorité des mots-clés que Linéo a mis en tête de config serait perdue.
+  const brutes = [
+    offreFT("PREMIER", { intitule: "Ingénieur automatisation" }),
+    offreFT("SECOND", { intitule: "Développeur automatisation" }),
+  ];
+  const lot = prepareLot(brutes, { motsCles: CLES });
+  assert.deepEqual(
+    lot.offres.map((o) => o.jobId),
+    ["PREMIER", "SECOND"],
+  );
+});
+
+test("sans motsCles, l'ordre d'arrivée est intact : les appelants existants ne changent pas", () => {
+  const brutes = [offreFT("A", { intitule: "Conducteur de ligne" }), offreFT("B", { intitule: "Ingénieur n8n" })];
+  const lot = prepareLot(brutes);
+  assert.deepEqual(
+    lot.offres.map((o) => o.jobId),
+    ["A", "B"],
+  );
+});
+
+test("l'alternance et le stage sont écartés AVANT le modèle, et comptés", () => {
+  // Le prompt dit « JAMAIS, sans exception » : faire trancher le modèle coûtait
+  // une place de lot et des tokens de sortie pour une réponse connue d'avance.
+  const brutes = [
+    offreFT("ALT", { intitule: "Alternance - Ingénieur automatisation (H/F)" }),
+    offreFT("STAGE", { intitule: "Stage automatisation 6 mois" }),
+    offreFT("DRAPEAU", { intitule: "Ingénieur automatisation", alternance: true }),
+    offreFT("VRAIE", { intitule: "Ingénieur automatisation" }),
+  ];
+  const lot = prepareLot(brutes, { motsCles: CLES });
+  assert.deepEqual(
+    lot.offres.map((o) => o.jobId),
+    ["VRAIE"],
+  );
+  assert.equal(lot.alternances, 3, "le compte doit être annoncé, pas silencieux");
+  assert.equal(lot.doublons, 0, "une alternance n'est pas un doublon de tournée");
+});
+
+test("« stagiaire » ne doit pas attraper un mot qui le contient par hasard", () => {
+  const lot = prepareLot([offreFT("OK", { intitule: "Ingénieur automatisation stagiairisation" })], {
+    motsCles: CLES,
+  });
+  assert.equal(lot.offres.length, 1, "la frontière de mot doit être respectée");
+});
+
+test("cibleesGardees mesure ce que la troncature a réellement retenu", () => {
+  const cibles = [...Array(3)].map((_, i) => offreFT(`C${i}`, { intitule: "Ingénieur automatisation" }));
+  const bruit = [...Array(5)].map((_, i) => offreFT(`B${i}`, { intitule: "Conducteur de ligne", description: "x" }));
+  const lot = prepareLot([...bruit, ...cibles], { maxOffres: 3, motsCles: CLES });
+  assert.equal(lot.cibleesGardees, 3, "les 3 places doivent aller aux 3 offres ciblées");
+});
+
+test("le champ interne de classement ne fuit JAMAIS vers le prompt", () => {
+  const lot = prepareLot([offreFT("A", { intitule: "Ingénieur automatisation" })], { motsCles: CLES });
+  assert.ok(!("_pertinence" in lot.offres[0]), "_pertinence est un détail de tri, pas une donnée d'offre");
+  const p = promptRank({ offres: lot.offres, filtres: {} });
+  assert.ok(!p.includes("_pertinence"), "le modèle ne doit pas voir notre pré-classement");
 });
 
 test("le score mesure l ADEQUATION au profil, pas la presence de mots-cles", () => {
