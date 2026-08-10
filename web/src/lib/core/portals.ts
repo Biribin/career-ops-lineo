@@ -172,3 +172,22 @@ export function lireFiltresPortals(): {
     alwaysAllow: liste(lf.always_allow),
   };
 }
+
+/**
+ * Les requêtes France Travail écrites à la main dans `france_travail.mots_cles`.
+ *
+ * Elles ne sont PAS dans `title_filter.positive` et ne s'en déduisent pas :
+ * « python », « data engineer », « chatbot » n'existent que là. Sans elles, un
+ * classement fondé sur les seuls `positive` ignorerait les termes qui ramènent le
+ * plus de volume — c'est-à-dire précisément ceux que Linéo a ajoutés parce qu'ils
+ * marchent.
+ *
+ * Lecteur partagé volontairement : `/api/search-plan` et `/api/rank` doivent lire
+ * le MÊME bloc, sinon on chercherait sur un jeu de termes et on classerait sur un
+ * autre. Tolérant : fichier absent ou illisible → liste vide, jamais d'exception.
+ */
+export function motsClesFranceTravail(): string[] {
+  const doc = loadYaml("portals.yml");
+  const bloc = (doc?.france_travail ?? {}) as Record<string, unknown>;
+  return listFrom(bloc.mots_cles);
+}

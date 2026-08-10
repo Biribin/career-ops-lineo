@@ -47,6 +47,19 @@ export const MAX_DESCRIPTION = 700;
 
 const txt = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
 
+/**
+ * Minuscules sans accents, pour comparer un mot-clé à un intitulé.
+ * « Ingénieur IA » et « ingenieur ia » doivent se reconnaître : France Travail
+ * publie les deux orthographes, et portals.yml aussi.
+ */
+const norm = (v) =>
+  String(v ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
 /** France Travail renvoie parfois le lieu comme objet ; on veut une chaîne lisible. */
 export function lieuLisible(brut) {
   if (typeof brut === "string") return brut.trim();
@@ -93,33 +106,95 @@ export function normaliseOffre(o) {
   };
 }
 
+/** Une offre d'alternance, de stage ou d'apprentissage. */
+export function estAlternance(brut, titre = "") {
+  if (brut && typeof brut === "object" && brut.alternance === true) return true;
+  return /\b(alternance|alternant|apprentissage|apprenti|stage|stagiaire)\b/i.test(norm(titre));
+}
+
 /**
- * Déduplique et borne le lot d'offres.
+ * À quel point une offre ressemble à ce que Linéo CHERCHE.
+ *
+ * Ce n'est PAS le score d'adéquation — celui-là mesure le profil contre l'offre
+ * et reste le travail du modèle. Ici on ne fait que décider, parmi des milliers
+ * d'offres, lesquelles méritent d'occuper une des places du lot.
+ *
+ * Le titre pèse quatre fois la description, et c'est mesuré : sur la tournée du
+ * 2026-08-10 (1 161 offres distinctes), 547 avaient un mot-clé dans le titre, et
+ * ce sont elles qui sont réellement du métier. Une offre qui ne mentionne un
+ * mot-clé qu'au fil de sa description est le plus souvent hors sujet — un
+ * « Conducteur de ligne » dont l'annonce cite l'automatisation de l'atelier.
+ *
+ * @param {{title?: string, description?: string}} offre
+ * @param {string[]} motsCles  mots-clés normalisés (voir clesNormalisees)
+ */
+export function scorePertinence(offre, motsCles = []) {
+  if (motsCles.length === 0) return 0;
+  const titre = norm(offre?.title);
+  const desc = norm(offre?.description);
+  let score = 0;
+  if (motsCles.some((c) => titre.includes(c))) score += 4;
+  if (motsCles.some((c) => desc.includes(c))) score += 1;
+  return score;
+}
+
+/** Normalise et dédoublonne une liste de mots-clés pour la comparaison. */
+export function clesNormalisees(...listes) {
+  const vus = new Set();
+  for (const liste of listes) {
+    for (const mot of Array.isArray(liste) ? liste : []) {
+      const cle = norm(mot);
+      if (cle) vus.add(cle);
+    }
+  }
+  return [...vus];
+}
+
+/**
+ * Déduplique, CLASSE, puis borne le lot d'offres.
  *
  * La déduplication est faite AVANT le plafond : sinon 60 places pourraient être
  * mangées par la même offre remontée par plusieurs requêtes de mots-clés
  * différents, ce qui est le cas courant (« n8n » et « automatisation » ramènent
  * largement les mêmes annonces).
  *
+ * LE CLASSEMENT EST CE QUI REND LE PLAFOND ACCEPTABLE
+ * ---------------------------------------------------
+ * Jusqu'ici la troncature se faisait dans l'ORDRE D'ARRIVÉE, donc dans l'ordre
+ * des requêtes. Mesuré sur la tournée du 2026-08-10, en France entière :
+ *
+ *   1 769 offres brutes -> 1 161 distinctes -> 150 au modèle
+ *   et ces 150 venaient d'UN SEUL mot-clé sur 33 (« automatisation »).
+ *
+ * `data engineer`, `python`, `ingénieur intégration`, `architecte solutions` —
+ * 400 offres à eux quatre — n'atteignaient jamais le tri. Le plafond ne gardait
+ * pas les meilleures offres, il gardait les premières arrivées.
+ *
+ * On classe donc par pertinence avant de couper. Le tri est STABLE : à score
+ * égal l'ordre d'arrivée est conservé, ce qui préserve la priorité des mots-clés
+ * que Linéo a écrits à la main en tête de `france_travail.mots_cles`.
+ *
  * `dejaVus` porte les jobId que Linéo a DÉJÀ dans son journal, quel que soit
  * leur statut : en attente de décision, partie en rédaction, ou écartée. Ces
  * offres étaient jusqu'ici retéléchargées, renotées et restockées à chaque
  * tournée. `etatCourant` les masquait ensuite à l'affichage, si bien que le
  * symptôme visible n'était pas « une offre revient » mais « la tournée ne
- * rapporte rien » : les 60 places du lot et l'appel LLM partaient sur des
- * annonces déjà tranchées. Les écarter ICI, avant le plafond ET avant le
- * modèle, est ce qui rend chaque tournée réellement neuve.
+ * rapporte rien » : les places du lot et l'appel LLM partaient sur des annonces
+ * déjà tranchées. Les écarter ICI, avant le plafond ET avant le modèle, est ce
+ * qui rend chaque tournée réellement neuve.
  *
  * @param {unknown[]} offresBrutes
- * @param {{ maxOffres?: number, dejaVus?: Set<string> | string[] }} [opts]
+ * @param {{ maxOffres?: number, dejaVus?: Set<string> | string[], motsCles?: string[] }} [opts]
  */
-export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus } = {}) {
+export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus, motsCles = [] } = {}) {
   const connus = dejaVus instanceof Set ? dejaVus : new Set(Array.isArray(dejaVus) ? dejaVus.map(txt) : []);
+  const cles = clesNormalisees(motsCles);
   const vues = new Set();
-  /** @type {Array<ReturnType<typeof normaliseOffre>>} */
+  /** @type {Array<ReturnType<typeof normaliseOffre> & {_pertinence: number}>} */
   const offres = [];
   let sansId = 0;
   let dejaVues = 0;
+  let alternances = 0;
 
   for (const brut of Array.isArray(offresBrutes) ? offresBrutes : []) {
     const o = normaliseOffre(brut);
@@ -133,10 +208,23 @@ export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus } = {
       dejaVues += 1;
       continue;
     }
-    offres.push(o);
+    // ÉCARTÉE ICI, pas laissée au modèle : « jamais d'alternance, de stage ou
+    // d'apprentissage » est une règle ABSOLUE du prompt, pas un jugement de
+    // pertinence. La faire appliquer par le modèle coûtait une place de lot et
+    // des tokens de sortie pour une offre dont la réponse était connue d'avance.
+    // Il y en avait 88 sur les 1 161 de la tournée du 2026-08-10.
+    if (estAlternance(brut, o.title)) {
+      alternances += 1;
+      continue;
+    }
+    offres.push({ ...o, _pertinence: scorePertinence(o, cles) });
   }
 
-  const gardees = offres.slice(0, maxOffres);
+  // Tri STABLE (garanti par la spec depuis ES2019) : à score égal, l'ordre
+  // d'arrivée est conservé, donc la priorité des mots-clés du YAML survit.
+  if (cles.length > 0) offres.sort((a, b) => b._pertinence - a._pertinence);
+
+  const gardees = offres.slice(0, maxOffres).map(({ _pertinence, ...o }) => o);
   return {
     offres: gardees,
     // `doublons` reste ce qu'il a toujours mesuré — la même annonce ramenée par
@@ -144,10 +232,16 @@ export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus } = {
     // précédente sont comptées à part : mélanger les deux rendrait impossible de
     // savoir si une tournée maigre vient de requêtes redondantes ou d'un
     // gisement épuisé.
-    doublons: (Array.isArray(offresBrutes) ? offresBrutes.length : 0) - offres.length - sansId - dejaVues,
+    doublons:
+      (Array.isArray(offresBrutes) ? offresBrutes.length : 0) - offres.length - sansId - dejaVues - alternances,
     sansId,
     dejaVues,
+    alternances,
     tronquees: offres.length - gardees.length,
+    // Combien des offres retenues portent un mot-clé dans leur intitulé. C'est la
+    // mesure qui dit si le classement sert à quelque chose : avant lui, ce chiffre
+    // dépendait du hasard de l'ordre des requêtes.
+    cibleesGardees: gardees.filter((o) => scorePertinence(o, cles) >= 4).length,
   };
 }
 
