@@ -147,19 +147,51 @@ export function motsClesFranceTravail(positive = [], enPlus = []) {
 }
 
 /**
+ * Le nom du paramètre de rayon chez France Travail est `distance`, PAS `rayon`.
+ *
+ * Vérifié contre l'API le 2026-08-10, requête « automatisation » autour de Paris :
+ *   rayon=30    → 14 offres   ⎫ identiques : `rayon` est ignoré en silence, et
+ *   rayon=100   → 14 offres   ⎭ c'est la distance par défaut (10 km) qui s'applique
+ *   distance=10 → 14 offres
+ *   distance=100→ 29 offres
+ * Le `rayon: 30` de portals.yml n'a donc jamais rien élargi : pendant des
+ * semaines, la tournée cherchait dans 10 km autour de Paris en croyant faire 30.
+ * L'API ne rejette pas les paramètres inconnus, d'où le silence.
+ */
+const PARAM_DISTANCE = "distance";
+
+/**
  * Construit les URLs France Travail. Une URL par mot-clé : c'est ce que faisait
  * l'agent, et ça garde un résultat interprétable (on sait quelle requête a
  * ramené quoi) au lieu d'un `motsCles` fourre-tout.
  *
+ * ORDRE DES URLs : toutes les requêtes France d'abord, les requêtes hors France
+ * ensuite. Ce n'est pas cosmétique. `prepareLot` tronque à MAX_OFFRES dans
+ * l'ordre d'arrivée ; or le corpus international de France Travail est à 84 %
+ * luxembourgeois (mesuré : 1 423 offres sur 1 691). Mettre l'Europe en tête
+ * ferait manger les places du lot par du Luxembourg avant que la France n'arrive.
+ *
  * @param {Object} o
  * @param {string[]} o.motsCles
- * @param {string[]} [o.communes]  codes INSEE ; [] = France entière (full remote)
- * @param {number} [o.rayon]
+ * @param {string[]} [o.communes]    codes INSEE ; [] = France entière (couvre le full remote)
+ * @param {number} [o.distance]      km autour de chaque commune ; ignoré si communes est vide
+ * @param {number} [o.rayon]         alias historique de `distance`, accepté pour ne pas
+ *                                   casser un portals.yml qui n'a pas encore été renommé
+ * @param {string[]} [o.continents]  codes paysContinent (991 = Europe hors France)
  * @param {number} [o.max]
  * @param {string} [o.range]
  * @returns {{ urls: string[], tronquees: number }}
  */
-export function urlsFranceTravail({ motsCles, communes = [], rayon = 30, max = 12, range = "0-149" }) {
+export function urlsFranceTravail({
+  motsCles,
+  communes = [],
+  distance,
+  rayon,
+  continents = [],
+  max = 12,
+  range = "0-149",
+}) {
+  const km = Number(distance ?? rayon ?? 30);
   const urls = [];
   const cibles = communes.length ? communes : [null];
 
@@ -168,8 +200,21 @@ export function urlsFranceTravail({ motsCles, communes = [], rayon = 30, max = 1
       const p = new URLSearchParams();
       if (commune) {
         p.set("commune", commune);
-        p.set("rayon", String(rayon));
+        if (Number.isFinite(km)) p.set(PARAM_DISTANCE, String(km));
       }
+      p.set("motsCles", mot);
+      p.set("range", range);
+      urls.push(`${BASE_FT}?${p.toString()}`);
+    }
+  }
+
+  // Hors France, APRÈS la France (voir le commentaire d'en-tête sur l'ordre).
+  for (const continent of continents) {
+    const code = String(continent ?? "").trim();
+    if (!code) continue;
+    for (const mot of motsCles) {
+      const p = new URLSearchParams();
+      p.set("paysContinent", code);
       p.set("motsCles", mot);
       p.set("range", range);
       urls.push(`${BASE_FT}?${p.toString()}`);
@@ -192,7 +237,8 @@ export function planRecherche({ filtres, ft = {} }) {
   const { urls, tronquees } = urlsFranceTravail({
     motsCles: retenus,
     communes: ft.communes ?? [],
-    rayon: ft.rayon ?? 30,
+    distance: ft.distance ?? ft.rayon ?? 30,
+    continents: ft.continents ?? [],
     max: ft.max_urls ?? 12,
   });
 

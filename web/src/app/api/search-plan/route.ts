@@ -23,7 +23,13 @@ export const dynamic = "force-dynamic";
 function blocFranceTravail(): {
   mots_cles?: string[];
   communes?: string[];
+  /** km autour de chaque commune. `rayon` est l'ancien nom, que l'API ignorait. */
+  distance?: number;
   rayon?: number;
+  /** codes paysContinent : 991 = Europe hors France (Belgique, Suisse…). */
+  continents?: string[];
+  /** libellés de pays gardés parmi les résultats `continents`. */
+  pays_gardes?: string[];
   max_urls?: number;
 } {
   try {
@@ -49,8 +55,12 @@ export async function GET() {
     // chaque partie, sans avoir à ouvrir le code.
     config: {
       motsClesConfig: ft.mots_cles ?? [],
+      // `communes: []` = France entière. C'est le cas normal depuis le
+      // 2026-08-10 : Linéo est mobile partout en France.
       communes: ft.communes ?? [],
-      rayon: ft.rayon ?? 30,
+      distance: ft.distance ?? ft.rayon ?? 30,
+      continents: ft.continents ?? [],
+      paysGardes: ft.pays_gardes ?? [],
       maxUrls: ft.max_urls ?? 12,
       blocPresent: Object.keys(ft).length > 0,
     },
