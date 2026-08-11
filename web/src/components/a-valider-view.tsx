@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, ExternalLink, Eye, FileText, Loader2, Mail, PenLine, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, ExternalLink, Eye, FileText, Loader2, Mail, PenLine, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
 
@@ -374,7 +374,13 @@ function Apercu({ fiche }: { fiche: Fiche }) {
     .map((p) => p.trim())
     .filter(Boolean);
   const aLettre = paragraphes.length > 0;
-  const aDocs = Boolean(fiche.cv_url || fiche.lettre_url);
+  // Le telechargement passe par l'app, donc il suffit que la fiche reference une
+  // branche. `cv_url` et `lettre_url` ne servent plus qu'a savoir si le rendu a
+  // eu lieu : ce sont des liens `github.com/blob/…` inutilisables tels quels
+  // (page et non fichier, depot prive, branche avec une barre oblique).
+  const aDocs = Boolean(fiche.branche_github && (fiche.cv_url || fiche.lettre_url));
+  const lienFichier = (type: "cv" | "lettre") =>
+    `/api/candidature-fichier?id=${encodeURIComponent(String(fiche.id))}&type=${type}`;
 
   if (!aLettre && !aDocs && args.length === 0) return null;
 
@@ -384,22 +390,20 @@ function Apercu({ fiche }: { fiche: Fiche }) {
         <div className="mb-3 flex flex-wrap gap-2">
           {fiche.cv_url && (
             <a
-              href={fiche.cv_url}
-              target="_blank"
-              rel="noreferrer"
+              href={lienFichier("cv")}
+              download
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[40px]"
             >
-              <FileText className="size-3.5" /> Voir le CV <ExternalLink className="size-3" />
+              <FileText className="size-3.5" /> Télécharger le CV <Download className="size-3" />
             </a>
           )}
           {fiche.lettre_url && (
             <a
-              href={fiche.lettre_url}
-              target="_blank"
-              rel="noreferrer"
+              href={lienFichier("lettre")}
+              download
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[40px]"
             >
-              <Mail className="size-3.5" /> Voir la lettre <ExternalLink className="size-3" />
+              <Mail className="size-3.5" /> Télécharger la lettre <Download className="size-3" />
             </a>
           )}
         </div>
