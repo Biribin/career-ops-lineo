@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, ExternalLink, Eye, FileText, Loader2, Mail, PenLine, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, ExternalLink, Eye, FileText, GraduationCap, Loader2, Mail, PenLine, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
+import { formationsPourFiche } from "@/lib/formations.mjs";
 
 type Fiche = {
   id: string;
@@ -292,6 +293,8 @@ function Carte({ fiche, onDecide }: { fiche: Fiche; onDecide: () => void }) {
 
       <Apercu fiche={fiche} />
 
+      <Formations fiche={fiche} />
+
       {!fiche.decidable && (
         <p className="mx-4 mb-3 flex items-center gap-2 rounded-lg border border-border bg-surface/60 px-3 py-2 text-xs text-muted">
           <Loader2 className="size-3.5 animate-spin" />
@@ -443,6 +446,78 @@ function Apercu({ fiche }: { fiche: Fiche }) {
           </div>
         </details>
       )}
+    </div>
+  );
+}
+
+/**
+ * Conseil de formation pour CETTE offre. Note interne : elle ne part nulle part.
+ *
+ * Depuis le 2026-08-11 les formations ne figurent plus sur aucun CV (décision de
+ * Linéo, il n'en parle plus qu'à l'oral). Ce bloc est donc le seul endroit où le
+ * sujet reste visible, et l'avertissement « n'apparaît sur aucun document envoyé »
+ * est là pour qu'on ne le rebranche jamais dans un document candidat.
+ */
+function Formations({ fiche }: { fiche: Fiche }) {
+  const { aFaire, dejaAcquis } = formationsPourFiche(fiche);
+  if (aFaire.length === 0 && dejaAcquis.length === 0) return null;
+
+  return (
+    <div className="border-t border-border px-4 py-3">
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium text-muted transition-colors hover:text-foreground">
+          <GraduationCap className="size-3.5" />
+          {aFaire.length > 0 ? "À travailler pour ce poste" : "Rien à travailler pour ce poste"}
+          {aFaire.length > 0 && (
+            <span className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] font-semibold text-muted">
+              {aFaire.length}
+            </span>
+          )}
+        </summary>
+
+        <div className="mt-3 space-y-3 rounded-lg border border-border bg-surface/60 p-3 text-xs leading-relaxed">
+          <p className="text-faint">
+            Note interne, pour toi seul. Elle <strong className="text-muted">n&apos;apparaît sur aucun document
+            envoyé</strong> : les formations ne sont plus écrites sur le CV, elles se disent à l&apos;oral.
+          </p>
+
+          {aFaire.length > 0 && (
+            <ol className="space-y-2">
+              {aFaire.map((f, i) => (
+                <li key={f.id} className="flex gap-2">
+                  <span className="shrink-0 font-semibold text-faint">{i + 1}.</span>
+                  <span>
+                    <span className="text-foreground/90">{f.libelle}</span>
+                    <span className="text-faint">
+                      {" "}
+                      — {f.org}, {f.effort}
+                    </span>
+                    <span className="mt-0.5 block text-faint">
+                      l&apos;offre dit&nbsp;: {f.motifs.join(", ")}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+
+          {dejaAcquis.length > 0 && (
+            <div className="border-t border-border pt-2">
+              <p className="mb-1 text-faint">
+                Demandé par l&apos;offre, et tu l&apos;as déjà en production. À sortir à l&apos;oral, pas à
+                travailler.
+              </p>
+              <ul className="list-disc space-y-1 pl-4">
+                {dejaAcquis.map((f) => (
+                  <li key={f.id} className="text-muted">
+                    <span className="text-faint">{f.motifs.join(", ")}&nbsp;:</span> {f.preuve}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </details>
     </div>
   );
 }
