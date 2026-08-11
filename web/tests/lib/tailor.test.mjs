@@ -10,12 +10,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  TERMES_BANNIS,
   jdEnBlocRequis,
   motsClesDepuisCv,
   motsClesDuClassifieur,
   motsClesVrais,
   nettoyer,
   phrasePresente,
+  termeBanni,
   titresCibles,
   titreVrai,
   vocabulaireCv,
@@ -227,4 +229,39 @@ test("titreVrai: à couverture égale, le fit déclaré tranche", () => {
     },
   });
   assert.equal(titreVrai("Backend Data Engineer", cibles), "Backend Engineer");
+});
+
+// « no-code » est banni des CV de Lineo depuis le 2026-08-11 (« moi je fais du low
+// code et du vibe code »). Il etait quand meme arrive dans le CV Nutripure, par
+// l'annonce : le terme y figurait, le classifieur l'a rendu, et il s'est retrouve
+// dans les mots-cles ATS. Le prompt ne suffit pas, d'ou ce filtre.
+test("termeBanni: reconnait no-code quelle que soit la graphie", () => {
+  for (const graphie of ["no-code", "No-Code", "NO CODE", "nocode", " no-code "]) {
+    assert.equal(termeBanni(graphie), true, graphie);
+  }
+});
+
+test("termeBanni: laisse passer ce qui n'est pas banni", () => {
+  for (const mot of ["low-code", "no-code-review", "code", "vibe coding", "n8n"]) {
+    assert.equal(termeBanni(mot), false, mot);
+  }
+});
+
+test("motsClesVrais: no-code ne peut pas entrer dans les mots-cles ATS", () => {
+  const cvAvecNoCode = CV.replace(
+    "n8n auto-hébergé, API REST",
+    "n8n auto-hébergé, no-code, API REST",
+  );
+  const jd = "Nous cherchons quelqu'un en no-code et n8n, API REST.";
+  const mots = motsClesVrais({
+    cvText: cvAvecNoCode,
+    jdText: jd,
+    classification: { existing: ["no-code", "n8n", "API REST"] },
+  });
+  assert.ok(!mots.some((m) => termeBanni(m)), "aucun terme banni : " + JSON.stringify(mots));
+  assert.ok(mots.length > 0, "le filtre ne doit pas vider la liste");
+});
+
+test("TERMES_BANNIS est exporte, pour que le garde-fou soit lisible d'ailleurs", () => {
+  assert.ok(TERMES_BANNIS.includes("no-code"));
 });

@@ -275,12 +275,36 @@ const PLAFOND_MOTS_CLES = 18;
  * @param {{cvText: string, jdText: string, classification?: {existing?: string[]}|null}} arg
  * @returns {string[]}
  */
+/**
+ * Termes que Lineo refuse de voir sur SES CV, meme quand l'annonce les emploie et
+ * meme quand ils sont techniquement vrais.
+ *
+ * « no-code » : consigne du 2026-08-11, « moi je fais du low code et du vibe code ».
+ * Le terme est arrive dans le CV Nutripure par cette voie, depuis l'annonce, et il
+ * s'est retrouve dans les mots-cles ATS ET dans le resume.
+ *
+ * ⚠️ Le meme terme reste VOLONTAIREMENT dans `modes/_profile.md`, qui sert a
+ * CHERCHER des offres : c'est ainsi qu'il les trouve. Ne pas confondre les deux
+ * usages, et ne pas « harmoniser » les deux fichiers.
+ */
+export const TERMES_BANNIS = ["no-code", "nocode", "no code"];
+
+/** Vrai si le terme est banni des CV, quelle que soit la casse ou la ponctuation. */
+export function termeBanni(mot) {
+  const n = normaliser(String(mot ?? "")).replace(/[^a-z0-9]+/g, " ").trim();
+  return TERMES_BANNIS.some((banni) => {
+    const b = normaliser(banni).replace(/[^a-z0-9]+/g, " ").trim();
+    return n === b || n.split(" ").join("") === b.split(" ").join("");
+  });
+}
+
 export function motsClesVrais({ cvText, jdText, classification = null }) {
   const vus = new Set();
   const out = [];
   for (const brut of [...motsClesDuClassifieur(classification, cvText), ...motsClesDepuisCv(cvText, jdText)]) {
     const mot = nettoyer(brut);
     if (!mot) continue;
+    if (termeBanni(mot)) continue;
     const cle = normaliser(mot);
     if (vus.has(cle)) continue;
     vus.add(cle);
