@@ -36,7 +36,7 @@ export default async function StatsPage() {
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <span className="text-muted">
             Le moteur de statistiques n&apos;a pas répondu&nbsp;:{" "}
-            <span className="text-foreground">{error}</span> Les chiffres ci-dessous sont donc vides — ce n&apos;est pas
+            <span className="text-foreground">{error}</span> Les chiffres ci-dessous sont donc vides — ce n’est pas
             un pipeline vide.
           </span>
         </p>
@@ -47,7 +47,7 @@ export default async function StatsPage() {
       {!error && !cles.aDesDonnees && (
         <p className="mt-5 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
           Aucune candidature enregistrée pour l&apos;instant : le tracker{" "}
-          <code className="text-foreground">data/applications.md</code> n&apos;existe pas encore. Il se crée à la
+          <code className="text-foreground">data/applications.md</code> n’existe pas encore. Il se crée à la
           première candidature envoyée. Les offres repérées, elles, sont dans{" "}
           <Link href="/pipeline" className="text-brand hover:underline">
             Candidatures

@@ -138,7 +138,7 @@ export function ConfigForm() {
               </div>
             ) : installed.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-                Pas encore d&apos;outil d&apos;IA ? Des options gratuites comme <span className="text-foreground">OpenCode</span> avec Qwen ou GLM font très bien l&apos;affaire.{" "}
+                Pas encore d’outil d’IA ? Des options gratuites comme <span className="text-foreground">OpenCode</span> avec Qwen ou GLM font très bien l’affaire.{" "}
                 <a href="https://career-ops.org/docs/free-ai-engine" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand hover:underline">
                   En obtenir un gratuitement <ExternalLink className="size-3" />
                 </a>

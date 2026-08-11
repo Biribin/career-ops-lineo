@@ -121,7 +121,7 @@ export function AValiderView() {
           Le clone du repo <code className="text-foreground">cv</code> est introuvable à{" "}
           <code className="text-foreground">{res.repo.racine}</code>. C&apos;est là que n8n dépose les fiches. Définis{" "}
           <code className="text-foreground">CV_REPO_ROOT</code> si ton clone est ailleurs, ou{" "}
-          <code className="text-foreground">CV_GITHUB_TOKEN</code> pour lire l&apos;inbox directement sur GitHub (c&apos;est
+          <code className="text-foreground">CV_GITHUB_TOKEN</code> pour lire l’inbox directement sur GitHub (c’est
           le mode prévu quand career-ops tourne en conteneur, sans clone).
         </p>
       )}
@@ -253,7 +253,7 @@ function Carte({ fiche, onDecide }: { fiche: Fiche; onDecide: () => void }) {
           <Mail className="size-3.5 shrink-0" />
           {sansCourriel ? (
             <span>
-              Aucun courriel de recruteur — <strong>Valider</strong> t&apos;enverra tout prêt à coller pour un dépôt
+              Aucun courriel de recruteur — <strong>Valider</strong> t’enverra tout prêt à coller pour un dépôt
               manuel sur le portail.
             </span>
           ) : (

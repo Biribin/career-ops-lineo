@@ -126,7 +126,7 @@ export function FirstScoreView() {
 
         <div className="relative px-7 pb-7 pt-8">
           <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-brand">
-            <span className="text-faint">//</span> l&apos;offre que nous avons trouvée pour vous — évaluée
+            <span className="text-faint">//</span> l’offre que nous avons trouvée pour vous — évaluée
           </p>
 
           <div className="mt-4 flex items-start gap-4">

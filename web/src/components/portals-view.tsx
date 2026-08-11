@@ -128,12 +128,12 @@ export function PortalsView() {
       {res && !res.available && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
           <code className="text-foreground">verify-portals.mjs</code> introuvable — cela nécessite une installation
-          career-ops complète (l&apos;interface web orchestre le validateur du cœur).
+          career-ops complète (l’interface web orchestre le validateur du cœur).
         </p>
       )}
       {res && res.available && !res.configured && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-          Pas encore de <code className="text-foreground">portals.yml</code> — demandez à l&apos;assistant de définir les entreprises à scanner.
+          Pas encore de <code className="text-foreground">portals.yml</code> — demandez à l’assistant de définir les entreprises à scanner.
         </p>
       )}
 
@@ -152,7 +152,7 @@ export function PortalsView() {
               </span>{" "}
               <span className="text-muted">
                 — leur lien carrières est cassé. Corrigez <code>careers_url</code> dans <code>portals.yml</code> (ou
-                demandez à l&apos;assistant de les réparer).
+                demandez à l’assistant de les réparer).
               </span>
             </div>
           )}

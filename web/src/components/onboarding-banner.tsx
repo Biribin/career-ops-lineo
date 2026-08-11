@@ -55,8 +55,8 @@ export function OnboardingBanner() {
       <h2 className="font-display text-xl text-landing">Terminons votre configuration</h2>
       <p className="mt-1.5 max-w-xl text-sm text-muted">
         career-ops fonctionne mieux quand il vous connaît. Il nous manque encore {items.join(", ")}.{" "}
-        <span className="text-foreground">Aucun YAML à modifier</span> — répondez en langage courant et l&apos;assistant
-        l&apos;écrit pour vous.
+        <span className="text-foreground">Aucun YAML à modifier</span> — répondez en langage courant et l’assistant
+        l’écrit pour vous.
       </p>
       {cli ? (
         <button
