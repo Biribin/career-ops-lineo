@@ -266,16 +266,6 @@ export function jdEnBlocRequis(jdText) {
 const PLAFOND_MOTS_CLES = 18;
 
 /**
- * Les mots-clés du contrat : union des deux sources, dédoublonnée sans tenir
- * compte de la casse ni des accents, plafonnée.
- *
- * Ordre : le classifieur du cœur d'abord (il rend l'orthographe de l'offre, celle
- * que l'ATS cherche), puis les compétences du CV dans l'ordre de l'offre.
- *
- * @param {{cvText: string, jdText: string, classification?: {existing?: string[]}|null}} arg
- * @returns {string[]}
- */
-/**
  * Termes que Lineo refuse de voir sur SES CV, meme quand l'annonce les emploie et
  * meme quand ils sont techniquement vrais.
  *
@@ -289,7 +279,12 @@ const PLAFOND_MOTS_CLES = 18;
  */
 export const TERMES_BANNIS = ["no-code", "nocode", "no code"];
 
-/** Vrai si le terme est banni des CV, quelle que soit la casse ou la ponctuation. */
+/**
+ * Vrai si le terme est banni des CV, quelle que soit la casse ou la ponctuation.
+ *
+ * @param {string} mot
+ * @returns {boolean}
+ */
 export function termeBanni(mot) {
   const n = normaliser(String(mot ?? "")).replace(/[^a-z0-9]+/g, " ").trim();
   return TERMES_BANNIS.some((banni) => {
@@ -298,6 +293,22 @@ export function termeBanni(mot) {
   });
 }
 
+/**
+ * Les mots-clés du contrat : union des deux sources, dédoublonnée sans tenir
+ * compte de la casse ni des accents, plafonnée.
+ *
+ * Ordre : le classifieur du cœur d'abord (il rend l'orthographe de l'offre, celle
+ * que l'ATS cherche), puis les compétences du CV dans l'ordre de l'offre.
+ *
+ * ⚠️ Ce bloc JSDoc porte le TYPE de la fonction : `web/` est typecheck en
+ * `checkJs`, donc rien ne doit s'intercaler entre lui et la signature. Le
+ * 2026-08-11, TERMES_BANNIS insere ici a fait perdre son type a `classification`,
+ * qui a ete infere `null | undefined` depuis sa valeur par defaut, et le build de
+ * production a casse sur l'appel de `src/app/api/tailor/route.ts`.
+ *
+ * @param {{cvText: string, jdText: string, classification?: {existing?: string[]}|null}} arg
+ * @returns {string[]}
+ */
 export function motsClesVrais({ cvText, jdText, classification = null }) {
   const vus = new Set();
   const out = [];
