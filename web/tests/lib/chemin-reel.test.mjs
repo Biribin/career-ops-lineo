@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { cheminReel } from "../../src/lib/core/chemin-reel.mjs";
+import { cheminReel, droitsExistants } from "../../src/lib/core/chemin-reel.mjs";
 
 /** Un bac a sable facon conteneur : un « volume » et un dossier « /app ». */
 function bac() {
@@ -90,6 +90,34 @@ test("une chaine de liens est suivie jusqu'au bout", (t) => {
   fs.writeFileSync(reel, "x");
   if (!lier(reel, milieu) || !lier(milieu, vu)) return t.skip("liens symboliques indisponibles sur ce poste");
   assert.equal(cheminReel(vu), reel);
+});
+
+test("les droits d'un fichier absent ne sont pas inventes", () => {
+  const { app } = bac();
+  assert.equal(droitsExistants(path.join(app, "rien.yml")), null);
+});
+
+test("le rename ne doit pas rendre un fichier 600 lisible par tous", (t) => {
+  // MESURE EN PRODUCTION, 2026-08-11 : au premier ajout d'entreprise,
+  // /app/data/perso/portals.yml est passe de -rw------- a -rw-r--r--. Un rename
+  // remplace l'inode, donc le fichier renait avec les droits du umask et le 600
+  // pose sur la couche utilisateur (CV, profil, recherches) disparait sans bruit.
+  if (process.platform === "win32") return t.skip("droits POSIX indisponibles sous Windows");
+  const { volume } = bac();
+  const cible = path.join(volume, "portals.yml");
+  fs.writeFileSync(cible, "avant\n");
+  fs.chmodSync(cible, 0o600);
+  assert.equal(droitsExistants(cible), 0o600);
+
+  // La sequence exacte de atomicWrite.
+  const droits = droitsExistants(cible);
+  const tmp = `${cible}.tmp-test`;
+  fs.writeFileSync(tmp, "apres\n");
+  fs.chmodSync(tmp, droits);
+  fs.renameSync(tmp, cible);
+
+  assert.equal(droitsExistants(cible), 0o600, "les droits ont survecu au rename");
+  assert.equal(fs.readFileSync(cible, "utf8"), "apres\n");
 });
 
 test("une boucle de liens s'arrete au lieu de tourner sans fin", (t) => {

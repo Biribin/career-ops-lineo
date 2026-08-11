@@ -50,3 +50,27 @@ export function cheminReel(fichier, sauts = 0) {
   }
   return cheminReel(path.resolve(path.dirname(fichier), cible), sauts + 1);
 }
+
+/**
+ * Les droits actuels d'un fichier, ou null s'il n'existe pas encore.
+ *
+ * Complément indispensable de `cheminReel` : une écriture atomique se termine par
+ * un `rename`, qui remplace l'inode. Le nouveau fichier naît donc avec les droits
+ * du umask (644 en général) — et le 600 posé sur la couche utilisateur disparaît
+ * en silence. Mesuré en production le 2026-08-11 : `/app/data/perso/portals.yml`
+ * est passé de `-rw-------` à `-rw-r--r--` au premier ajout d'entreprise.
+ *
+ * Ces quatre fichiers contiennent le CV, le profil et les recherches de Linéo :
+ * les rendre lisibles par tout le monde n'est pas un détail cosmétique, et
+ * personne ne s'en apercevrait avant longtemps.
+ *
+ * @param {string} chemin
+ * @returns {number|null} les bits de permission (masqués par 0o777), ou null
+ */
+export function droitsExistants(chemin) {
+  try {
+    return fs.statSync(chemin).mode & 0o777;
+  } catch {
+    return null; // rien à préserver : le umask fera foi
+  }
+}
