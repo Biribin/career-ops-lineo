@@ -33,6 +33,7 @@ import {
   contexteCvYaml,
   dureeInventee,
   dureesAnnees,
+  estSousSequence,
   nettoieYamlAdapte,
   periodes,
   promptCvYaml,
@@ -167,7 +168,36 @@ test("REFUS : une date reecrite", () => {
     adapte: adapteBien().replace("period: Depuis mars 2026", "period: Depuis 2024"),
   });
   assert.equal(r.ok, false);
-  assert.match(r.motif, /dates ont ete modifiees|dates ont été modifiées/);
+  assert.match(r.motif, /dates ne sont plus celles d'origine/);
+});
+
+test("les dates sont une sous-sequence, pas une egalite", () => {
+  assert.ok(estSousSequence(["2025", "2019 - 2024"], ["Depuis mars 2026", "2025", "2019 - 2024"]));
+  assert.ok(estSousSequence([], ["2025"]), "tout retirer reste une sous-sequence");
+  assert.ok(!estSousSequence(["2024"], ["2025"]), "une date reecrite n'en est pas une");
+  assert.ok(!estSousSequence(["2019 - 2024", "2025"], ["2025", "2019 - 2024"]), "l'ordre compte");
+  assert.ok(!estSousSequence(["2025", "2025"], ["2025"]), "on ne peut pas dupliquer une date");
+});
+
+test("RETIRER une experience entiere est permis, c'est le mandat de coupe", () => {
+  // L'incident du 2026-08-11, exécution n8n 973546 : l'agent a retiré le poste de
+  // professeur particulier, hors sujet pour une offre d'IA agentique. La ligne
+  // `period: 2025` a disparu avec lui, et l'égalité stricte refusait « les dates
+  // ont été modifiées » alors qu'aucune ne l'avait été.
+  const base = ORIGINAL.replace(
+    "education:",
+    "  - role: Professeur particulier\n    org: Cours particuliers\n    period: 2025\n    highlights:\n      - >-\n        Deux eleves de terminale accompagnes.\n\neducation:",
+  );
+  assert.deepEqual(periodes(base), ["Depuis mars 2026", "2025", "2019 - 2024"]);
+
+  // L'agent retire le bloc entier, comme en production.
+  const sansCours = base.replace(
+    "  - role: Professeur particulier\n    org: Cours particuliers\n    period: 2025\n    highlights:\n      - >-\n        Deux eleves de terminale accompagnes.\n\n",
+    "",
+  );
+  const r = verifieCvAdapte({ original: base, adapte: sansCours });
+  assert.equal(r.ok, true, r.motif);
+  assert.deepEqual(periodes(r.adaptedYaml), ["Depuis mars 2026", "2019 - 2024"]);
 });
 
 test("REFUS : une anciennete inventee, meme apres nettoyage", () => {

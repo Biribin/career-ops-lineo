@@ -203,6 +203,26 @@ export function periodes(yamlText) {
   return out;
 }
 
+/**
+ * `petite` est-elle une sous-séquence de `grande` ? Mêmes valeurs, même ordre,
+ * absences permises.
+ *
+ * C'est la relation exacte entre les dates d'un CV adapté et celles du CV
+ * d'origine, une fois la coupe autorisée : on peut retirer une expérience, on ne
+ * peut ni réécrire une date, ni en inventer, ni en changer l'ordre.
+ *
+ * @param {string[]} petite
+ * @param {string[]} grande
+ * @returns {boolean}
+ */
+export function estSousSequence(petite, grande) {
+  let i = 0;
+  for (const v of grande) {
+    if (i < petite.length && petite[i] === v) i++;
+  }
+  return i === petite.length;
+}
+
 const RE_DUREE_ANNEES = /\b(?:un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|\d+)\s+ans?\b/gi;
 
 /** Le texte cite-t-il une durée en années ? Dit seulement « il y en a », pas « c'est faux ». */
@@ -267,13 +287,29 @@ export function verifieCvAdapte({ original, adapte }) {
     };
   }
 
-  // 2 — dates intactes, à l'identique et dans le même ordre.
+  // 2 — aucune date ALTÉRÉE ni AJOUTÉE. Les dates restantes doivent former une
+  // sous-séquence de celles d'origine : même valeurs, même ordre, mais des
+  // absences sont permises.
+  //
+  // POURQUOI PAS L'ÉGALITÉ STRICTE, qui était la règle jusqu'au 2026-08-11. Elle
+  // contredisait le mandat de coupe. Retirer une expérience entière emporte sa
+  // ligne `period`, donc la liste raccourcit : la vérification refusait alors
+  // « les dates ont été modifiées » alors qu'aucune ne l'avait été. C'est ce qui a
+  // bloqué la candidature Devoteam (exécution n8n 973546), l'agent ayant retiré
+  // le poste de professeur particulier, hors sujet pour une offre d'IA agentique.
+  //
+  // La sous-séquence garde tout le pouvoir de détection utile : une date réécrite
+  // (« Depuis mars 2026 » devenu « Depuis 2024 »), une date inventée ou un ordre
+  // chamboulé ne sont pas des sous-séquences. Seule la suppression passe, et
+  // supprimer une entrée est un choix éditorial légitime, pas un mensonge.
   const avant = periodes(src);
   const apres = periodes(yamlText);
-  if (avant.join("|") !== apres.join("|")) {
+  if (!estSousSequence(apres, avant)) {
     return {
       ok: false,
-      motif: `les dates ont été modifiées : ${JSON.stringify(avant)} devient ${JSON.stringify(apres)}`,
+      motif:
+        `les dates ne sont plus celles d'origine : ${JSON.stringify(avant)} devient ` +
+        `${JSON.stringify(apres)}. Retirer une entrée est permis, en réécrire une date non`,
     };
   }
 
