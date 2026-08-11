@@ -7,12 +7,15 @@
  * `careers_url`, e.g. `jobs.lever.co/<slug>`) is easy to guess wrong — and a
  * wrong slug 404s silently on every future scan, so the company never appears
  * in results and the mistake is invisible. This script probes the public
- * Greenhouse / Ashby / Lever endpoints for a company's slug (or for candidate
- * slugs derived from its name) and reports which resolve.
+ * Greenhouse / Ashby / Lever / SmartRecruiters endpoints for a company's slug
+ * (or for candidate slugs derived from its name) and reports which resolve.
  *
  * A 200 that returns an empty job list is reported as 'live but empty' — a
  * legitimate state during between-hires periods — kept distinct from an
- * unresolved (404/wrong) slug so a quiet board isn't mistaken for a typo.
+ * unresolved (404/wrong) slug so a quiet board isn't mistaken for a typo. That
+ * reading only holds for an ATS that 404s an unknown slug, which is why no
+ * discovery path may treat 'empty' as evidence without asking
+ * probeProvesTenant() first.
  *
  * Usage:
  *   node verify-portals.mjs                 # sweep tracked_companies in portals.yml
@@ -65,10 +68,11 @@ export const ATS = {
   // back 1/5), and SmartRecruiters covers a large slice of European companies.
   // Payload is `{ content: [...], totalFound }`, not a bare array.
   //
-  // Reached only through discoverAlternates: when a company's configured
-  // greenhouse/ashby/lever slug starts 404ing, we now also ask whether it moved
-  // to SmartRecruiters. The answer is printed as a suggestion for a human —
-  // nothing is written to portals.yml.
+  // Reached by both slug-discovery paths: the cross-probe fired when a
+  // company's configured greenhouse/ashby/lever slug starts 404ing (has it
+  // moved to SmartRecruiters?), and `--add` for a name with no entry yet. Either
+  // way the answer is printed as a suggestion for a human — nothing is written
+  // to portals.yml.
   //
   // `emptyProvesTenant: false` is what makes that safe. The other three ATSes
   // answer 404 for an unknown slug, so a 200 with zero jobs genuinely means
@@ -78,6 +82,12 @@ export const ATS = {
   // company (verified 2026-08-07). Without the flag, every failing slug would
   // draw a confident "→ try smartrecruiters/<guess>" that is pure noise. Only a
   // populated board is evidence here.
+  //
+  // That rule lived inline in discoverAlternates and `--add` never learned it,
+  // so `--add "<anything>"` printed a SmartRecruiters suggestion for every name
+  // on earth (caught 2026-08-11 on an employer with no SmartRecruiters tenant at
+  // all — its board is on WelcomeKit). It is now one shared predicate,
+  // probeProvesTenant(); do not re-inline it in a third caller.
   smartrecruiters: {
     probeUrl: (slug) => `https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=1`,
     jobCount: (json) =>
@@ -216,7 +226,7 @@ export function classifyFetchError(err) {
 /**
  * Probe one ATS for one slug and classify the result.
  *
- * @param {string} ats - Key into ATS (greenhouse | ashby | lever).
+ * @param {string} ats - Key into ATS (greenhouse | ashby | lever | smartrecruiters).
  * @param {string} slug - Candidate slug to probe.
  * @param {{fetchJson?: Function, eu?: boolean}} [deps] - Injectable HTTP for
  *   testability; `eu` selects Lever's EU data-residency instance.
@@ -272,24 +282,56 @@ export async function probeSlug(
   }
 }
 
+/**
+ * Does a probe result prove the tenant exists?
+ *
+ * 'live' always does — jobs came back. An empty 200 only does on an ATS that
+ * 404s an unknown slug (see ATS.smartrecruiters.emptyProvesTenant): elsewhere it
+ * is the byte-for-byte response an invented slug gets, so it is evidence of
+ * nothing. Every discovery path must filter through this before turning a probe
+ * into a suggestion a human would paste into portals.yml.
+ *
+ * @param {{status?: string, ats?: string}|null|undefined} r - A probeSlug result.
+ * @returns {boolean} True when the slug is worth suggesting.
+ */
+export function probeProvesTenant(r) {
+  if (!r) return false;
+  if (r.status === 'live') return true;
+  if (r.status !== 'empty') return false;
+  return ATS[r.ats]?.emptyProvesTenant !== false;
+}
+
+/**
+ * Every (ats, slug, eu) triple to probe for a company name, in order.
+ *
+ * Shared by both discovery paths so they cover identical ground. Lever has no
+ * separate 'lever-eu' registry key any more (unified into a single 'lever' + an
+ * eu flag), so its EU data-residency instance must be enumerated explicitly here
+ * or EU-only tenants stay undiscoverable — which is exactly what `--add` did
+ * while it ran its own loop.
+ *
+ * @param {string} name - Company display name.
+ * @yields {{ats: string, slug: string, eu: boolean}} Probe targets, most-specific slug first.
+ */
+function* slugProbePlan(name) {
+  for (const slug of deriveSlugCandidates(name)) {
+    for (const ats of Object.keys(ATS)) {
+      for (const eu of ats === 'lever' ? [false, true] : [false]) {
+        yield { ats, slug, eu };
+      }
+    }
+  }
+}
+
 /** Probe slug variants across all ATSes; prefer live boards over empty ones. */
 async function discoverAlternates(name, { fetchJson }) {
   let bestEmpty = null;
-  for (const slug of deriveSlugCandidates(name)) {
-    for (const ats of Object.keys(ATS)) {
-      // Lever no longer has a separate 'lever-eu' registry key (unified into a
-      // single 'lever' + eu flag), so both instances must be probed explicitly
-      // here or EU-only tenants become undiscoverable via --add.
-      const euVariants = ats === 'lever' ? [false, true] : [false];
-      for (const eu of euVariants) {
-        const r = await probeSlug(ats, slug, { fetchJson, eu });
-        if (r.status === 'live') return r;
-        // An empty board is only a fallback for ATSes where "empty" implies the
-        // tenant exists (see ATS.smartrecruiters.emptyProvesTenant).
-        if (r.status === 'empty' && !bestEmpty && ATS[ats]?.emptyProvesTenant !== false)
-          bestEmpty = r;
-      }
-    }
+  for (const { ats, slug, eu } of slugProbePlan(name)) {
+    const r = await probeSlug(ats, slug, { fetchJson, eu });
+    // `eu` is carried on the result because ats is 'lever' for both instances —
+    // without it a suggestion can't say which datacenter to write down.
+    if (r.status === 'live') return { ...r, eu };
+    if (!bestEmpty && probeProvesTenant(r)) bestEmpty = { ...r, eu };
   }
   return bestEmpty;
 }
@@ -507,40 +549,66 @@ function printResults(results) {
   }
 }
 
-async function runAdd(name, { fetchJson }) {
+/**
+ * Probe every slug candidate for a company name and report what resolved.
+ *
+ * Only tenant-proving probes count (probeProvesTenant): an inconclusive empty
+ * response is tallied and reported as dropped, never printed as a hit and never
+ * promoted to the suggestion — a wrong slug written into portals.yml 404s
+ * silently on every later scan, which is the exact failure this script exists to
+ * prevent.
+ *
+ * @param {string} name - Company display name to derive slugs from.
+ * @param {{fetchJson?: Function, log?: Function}} [deps] - Injectable HTTP and
+ *   sink so the reporting is assertable offline.
+ * @returns {Promise<{hits: Array<object>, inconclusive: number, best: object|null}>}
+ *   `best` is the slug a human should write down, or null when nothing resolved.
+ */
+export async function runAdd(name, { fetchJson = defaultFetchJson, log = console.log } = {}) {
   const candidates = deriveSlugCandidates(name);
   if (candidates.length === 0) {
     console.error('verify-portals: --add needs a company name');
     process.exit(1);
   }
-  console.log(
-    `Probing ${candidates.length} slug candidate(s) for '${name}' across Greenhouse/Ashby/Lever...\n`,
+  log(
+    `Probing ${candidates.length} slug candidate(s) for '${name}' across ${Object.keys(ATS).join('/')}...\n`,
   );
   const hits = [];
-  for (const slug of candidates) {
-    for (const ats of Object.keys(ATS)) {
-      const r = await probeSlug(ats, slug, { fetchJson });
-      if (r.status !== 'missing') {
-        hits.push(r);
-        console.log(
-          `  ${ICON[r.status]} ${ats}: ${slug}` +
-            (r.status === 'empty'
-              ? ' (live but empty)'
-              : ` (${r.jobCount} jobs)`),
-        );
-      }
+  let inconclusive = 0;
+  for (const { ats, slug, eu } of slugProbePlan(name)) {
+    const r = await probeSlug(ats, slug, { fetchJson, eu });
+    if (r.status === 'missing') continue;
+    if (!probeProvesTenant(r)) {
+      inconclusive += 1;
+      continue;
+    }
+    const hit = { ...r, eu };
+    hits.push(hit);
+    log(
+      `  ${ICON[r.status]} ${ats}${eu ? ' (eu)' : ''}: ${slug}` +
+        (r.status === 'empty' ? ' (live but empty)' : ` (${r.jobCount} jobs)`),
+    );
+  }
+  const best = hits.find((h) => h.status === 'live') || hits[0] || null;
+  if (!best) {
+    log('  ❌ No slug variant resolved on any ATS. Check the careers_url manually.');
+    // Say what was thrown away rather than let "nothing found" imply "nothing
+    // answered" — these probes DID return 200, they just prove nothing.
+    if (inconclusive > 0) {
+      log(
+        `  ➖ ${inconclusive} empty response(s) ignored as inconclusive: SmartRecruiters` +
+          ' answers 200 + zero jobs for any string, tenant or not.',
+      );
+    }
+  } else {
+    log(
+      `\nSuggested: careers_url for ${best.ats}${best.eu ? ' (EU instance)' : ''} → slug '${best.slug}'`,
+    );
+    if (best.status === 'empty') {
+      log('  ⚠️  Board is live but empty — open it by hand before adding the entry.');
     }
   }
-  if (hits.length === 0) {
-    console.log(
-      '  ❌ No slug variant resolved on any ATS. Check the careers_url manually.',
-    );
-  } else {
-    const best = hits.find((h) => h.status === 'live') || hits[0];
-    console.log(
-      `\nSuggested: careers_url for ${best.ats} → slug '${best.slug}'`,
-    );
-  }
+  return { hits, inconclusive, best };
 }
 
 async function main() {

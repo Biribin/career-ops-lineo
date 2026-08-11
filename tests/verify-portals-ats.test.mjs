@@ -9,13 +9,24 @@
 //   2. SmartRecruiters answers HTTP 200 + `{totalFound: 0, content: []}` for
 //      ANY slug, so every failing company drew a confident
 //      "→ try smartrecruiters/<guess>" suggestion built from a guess.
+//   3. Fix (2) landed inline in discoverAlternates only, so the OTHER discovery
+//      path — `--add` — kept suggesting a guessed SmartRecruiters slug for every
+//      name on earth (caught 2026-08-11). Both paths now share
+//      probeProvesTenant() and slugProbePlan().
 //
-// Both are pinned below. Every probe here injects `fetchJson`: this suite must
-// never touch the network, or it would fail whenever an ATS is down.
+// All three are pinned below. Every probe here injects `fetchJson`: this suite
+// must never touch the network, or it would fail whenever an ATS is down.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ATS, parseAtsSlug, probeSlug, verifyCompanies } from '../verify-portals.mjs';
+import {
+  ATS,
+  parseAtsSlug,
+  probeProvesTenant,
+  probeSlug,
+  runAdd,
+  verifyCompanies,
+} from '../verify-portals.mjs';
 
 /** An HTTP 404, shaped the way providers/_http.mjs throws it. */
 function http404() {
@@ -120,4 +131,60 @@ test('un board SmartRecruiters peuplé, lui, est bien suggéré', async () => {
   assert.equal(resultats[0].status, 'missing');
   assert.equal(resultats[0].suggested?.ats, 'smartrecruiters');
   assert.equal(resultats[0].suggested?.jobCount, 7);
+});
+
+test('probeProvesTenant : un 200 vide ne prouve rien là où un slug inconnu ne 404 pas', () => {
+  // La règle que les deux chemins de découverte doivent partager. Un board
+  // peuplé est toujours une preuve ; un board vide ne l'est que sur un ATS qui
+  // répond 404 à un slug inventé.
+  assert.equal(probeProvesTenant({ status: 'live', ats: 'smartrecruiters' }), true);
+  assert.equal(probeProvesTenant({ status: 'empty', ats: 'greenhouse' }), true);
+  assert.equal(probeProvesTenant({ status: 'empty', ats: 'smartrecruiters' }), false);
+  assert.equal(probeProvesTenant({ status: 'missing', ats: 'greenhouse' }), false);
+  assert.equal(probeProvesTenant(null), false);
+});
+
+test("--add ne suggère plus un slug SmartRecruiters deviné (régression 2026-08-11)", async () => {
+  // Cas réel du 2026-08-11 : un employeur sans aucun locataire SmartRecruiters
+  // (son board est chez WelcomeKit), pour qui l'API répond quand même 200 + zéro
+  // offre sur chacune des 8 variantes de slug. L'ancienne boucle de --add les
+  // comptait comme des hits et en promouvait une en « Suggested: » — un slug que
+  // personne ne peut utiliser, écrit dans portals.yml, qui 404 en silence à
+  // chaque scan suivant.
+  const lignes = [];
+  const { best, hits, inconclusive } = await runAdd('Ghostcorp', {
+    fetchJson: fauxFetch({ 'api.smartrecruiters.com': { totalFound: 0, content: [] } }),
+    log: (ligne) => lignes.push(ligne),
+  });
+  assert.equal(best, null);
+  assert.deepEqual(hits, []);
+  // Les sondes ont bien répondu 200 : le rapport doit dire ce qu'il a écarté,
+  // sinon « rien trouvé » se lit comme « rien n'a répondu ».
+  assert.equal(inconclusive, 8);
+  const sortie = lignes.join('\n');
+  assert.ok(!sortie.includes('Suggested'), sortie);
+  assert.ok(sortie.includes('inconclusive'), sortie);
+});
+
+test('--add suggère en revanche un board SmartRecruiters peuplé', async () => {
+  const { best } = await runAdd('Acme', {
+    fetchJson: fauxFetch({
+      'companies/acme/postings': { totalFound: 7, content: [{ id: '1' }] },
+    }),
+    log: () => {},
+  });
+  assert.equal(best?.ats, 'smartrecruiters');
+  assert.equal(best?.jobCount, 7);
+});
+
+test('--add sonde aussi l\'instance Lever EU', async () => {
+  // Son ancienne boucle n'itérait pas le drapeau eu, donc un locataire EU-only
+  // était indécouvrable par --add alors que le cross-probe le trouvait.
+  const { best } = await runAdd('Diabolocom', {
+    fetchJson: fauxFetch({ 'api.eu.lever.co/v0/postings/diabolocom': [{}, {}] }),
+    log: () => {},
+  });
+  assert.equal(best?.ats, 'lever');
+  assert.equal(best?.eu, true);
+  assert.equal(best?.jobCount, 2);
 });

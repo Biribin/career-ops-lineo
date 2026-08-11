@@ -6,8 +6,9 @@
  *
  * verify-portals.mjs already probes every tracked company's ATS slug and, for
  * a failing Greenhouse/Ashby/Lever entry, cross-probes slug variants across
- * all three ATSes and attaches `suggested: { ats, slug }` when one resolves
- * (see discoverAlternates() in verify-portals.mjs). That tool is read-only —
+ * every ATS it supports and attaches `suggested: { ats, slug, eu? }` when one
+ * resolves (see discoverAlternates() in verify-portals.mjs). That tool is
+ * read-only —
  * this script is the write side: it reuses the SAME probe/suggestion logic
  * (no re-implementation, no HTML scraping, no hardcoded company list) and
  * patches the matching `tracked_companies` entry in portals.yml.
@@ -71,8 +72,13 @@ export function splitCompanyBlocks(text) {
   return { lines, blocks };
 }
 
-/** Build the replacement careers_url/api pair for a resolved {ats, slug}. */
-function resolvedUrls({ ats, slug, eu }) {
+/**
+ * Build the replacement careers_url/api pair for a resolved {ats, slug}.
+ *
+ * @returns {{careersUrl: string, api: string|null}|null} Null for an ATS this
+ *   writer cannot express — the caller must then leave the entry alone.
+ */
+export function resolvedUrls({ ats, slug, eu }) {
   if (ats === 'greenhouse') {
     return {
       careersUrl: `https://job-boards.greenhouse.io/${slug}`,
@@ -82,11 +88,27 @@ function resolvedUrls({ ats, slug, eu }) {
   if (ats === 'ashby') {
     return { careersUrl: `https://jobs.ashbyhq.com/${slug}`, api: null };
   }
-  // lever
-  return {
-    careersUrl: `https://jobs.${eu ? 'eu.' : ''}lever.co/${slug}`,
-    api: null,
-  };
+  if (ats === 'lever') {
+    // `eu` distinguishes Lever's EU data-residency instance, which shares the
+    // 'lever' key. Writing the base host for an EU-only tenant yields a URL that
+    // 404s on every scan — the exact failure this script exists to repair.
+    return {
+      careersUrl: `https://jobs.${eu ? 'eu.' : ''}lever.co/${slug}`,
+      api: null,
+    };
+  }
+  if (ats === 'smartrecruiters') {
+    // careers.smartrecruiters.com is DELIBERATELY absent from verify-portals'
+    // tier-1 ATS_URL_PATTERNS: this URL shape routes the entry to
+    // providers/smartrecruiters.mjs, which is the code the real scanner runs.
+    return { careersUrl: `https://careers.smartrecruiters.com/${slug}`, api: null };
+  }
+  // Unknown ATS: refuse rather than guess. This used to fall through to the
+  // Lever shape, so once SmartRecruiters joined verify-portals' probe table a
+  // smartrecruiters suggestion was written as `https://jobs.lever.co/<slug>` —
+  // a dead URL, under a note claiming a migration to SmartRecruiters, i.e. the
+  // silent-404 entry this whole tool exists to prevent.
+  return null;
 }
 
 /**
@@ -278,10 +300,17 @@ export function computeFixes(rawText, results, { dateStr = new Date().toISOStrin
   // pending above the current edit point never has its recorded position
   // invalidated by a fix applied further down.
   const pending = [];
+  const skipped = [];
   for (const r of results) {
     if (r.status !== 'missing' || !r.suggested) continue;
     const block = blocksByName.get(r.name);
     if (!block) continue; // name mismatch — leave untouched rather than guess
+    // A suggestion whose ATS has no URL shape here is reported, never written:
+    // guessing the shape is how a "fix" becomes a permanently dead careers_url.
+    if (!resolvedUrls(r.suggested)) {
+      skipped.push({ name: r.name, ats: r.suggested.ats, slug: r.suggested.slug });
+      continue;
+    }
     pending.push({ r, block });
   }
   pending.sort((a, b) => b.block.startLine - a.block.startLine);
@@ -302,12 +331,13 @@ export function computeFixes(rawText, results, { dateStr = new Date().toISOStrin
   // should read like the verify-portals run, not our bottom-to-top processing order).
   const fixes = results.map((r) => fixesByName.get(r.name)).filter(Boolean);
 
-  return { text: lines.join('\n'), fixes };
+  return { text: lines.join('\n'), fixes, skipped };
 }
 
-function printDiff(fixes, { dryRun }) {
+function printDiff(fixes, { dryRun, skipped = [] }) {
   if (fixes.length === 0) {
     console.log('No resolvable slug fixes found — nothing to do.');
+    if (skipped.length > 0) printSkipped(skipped);
     return;
   }
   console.log(`${dryRun ? '[dry run] Would fix' : 'Fixed'} ${fixes.length} entr${fixes.length === 1 ? 'y' : 'ies'}:\n`);
@@ -315,6 +345,20 @@ function printDiff(fixes, { dryRun }) {
     console.log(`  ${f.name}: ${f.oldAts} -> ${f.newAts}`);
     console.log(`    - ${f.careersUrlOld}`);
     console.log(`    + ${f.careersUrlNew}`);
+  }
+  if (skipped.length > 0) printSkipped(skipped);
+}
+
+/**
+ * Name what was deliberately not written. Silence here would read as "nothing
+ * else resolved", when in fact a slug resolved and this writer couldn't express it.
+ */
+function printSkipped(skipped) {
+  console.log(
+    `\n➖ ${skipped.length} resolved suggestion(s) left untouched — no careers_url shape for that ATS:`,
+  );
+  for (const s of skipped) {
+    console.log(`  ${s.name}: ${s.ats}/${s.slug} — add it to resolvedUrls() or edit portals.yml by hand.`);
   }
 }
 
@@ -333,9 +377,9 @@ async function main() {
 
   const { results } = await verifyPortalsFile(filePath);
   const rawText = readFileSync(filePath, 'utf-8');
-  const { text, fixes } = computeFixes(rawText, results);
+  const { text, fixes, skipped } = computeFixes(rawText, results);
 
-  printDiff(fixes, { dryRun });
+  printDiff(fixes, { dryRun, skipped });
 
   if (!dryRun && fixes.length > 0) {
     writeFileSync(filePath, text, 'utf-8');
