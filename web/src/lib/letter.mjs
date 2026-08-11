@@ -47,6 +47,34 @@ export function dureeInventee(s) {
   return /\b(?:un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|\d+)\s+ans?\b/i.test(String(s ?? ""));
 }
 
+/**
+ * Le candidat n'a JAMAIS travaillé à distance : il est disponible pour du full
+ * remote et prêt à déménager, ce qui n'est pas la même chose.
+ *
+ * Défaut réel du 2026-08-11, candidature Nutripure : « Le full remote que
+ * j'accepte déjà dans mon activité actuelle me permettrait de rejoindre votre
+ * équipe sans contrainte de lieu ». Le modèle a lu « full remote accepté » dans
+ * le profil et l'a converti en pratique actuelle. C'est vérifiable en entretien
+ * en une question, et ça emporte la crédibilité du reste de la lettre.
+ *
+ * On DÉTECTE au lieu de réécrire : reformuler une affirmation de lieu sans
+ * connaître l'offre produirait une phrase fausse dans l'autre sens. Lever bloque
+ * la candidature, ce qui est le comportement voulu.
+ */
+export function teletravailInvente(s) {
+  const t = String(s ?? "");
+  return [
+    // « le full remote que je pratique / j'accepte déjà … actuelle »
+    /(?:remote|distance|t[ée]l[ée]travail)[^.]{0,80}\b(?:d[ée]j[àa]|actuel(?:le)?(?:ment)?|aujourd'hui)\b/i,
+    /\b(?:d[ée]j[àa]|actuel(?:le)?(?:ment)?|aujourd'hui)\b[^.]{0,80}(?:remote|[àa] distance|t[ée]l[ée]travail)/i,
+    // « je travaille / je suis en full remote », SAUF quand un mot de disponibilité
+    // s'intercale : « je suis disponible en full remote » reste vrai et dicible.
+    /\bje\s+(?:travaille|suis)\b(?:(?!\b(?:disponible|ouvert|pr[êe]t|mobile|candidat|int[ée]ress[ée])\b)[^.]){0,40}(?:en\s+(?:full\s+)?remote|[àa]\s+distance|en\s+t[ée]l[ée]travail)/i,
+    // « mon poste actuel est en remote »
+    /\bmon\s+(?:poste|activit[ée]|emploi)\s+actuel(?:le)?\b[^.]{0,60}(?:remote|distance|t[ée]l[ée]travail)/i,
+  ].some((motif) => motif.test(t));
+}
+
 /** Construit le prompt. Les faits viennent du CV et de l'offre, jamais du modèle. */
 export function promptLettre({ offre = {}, profilCv = "", candidat = {}, consigne = "" }) {
   return [
@@ -65,6 +93,9 @@ export function promptLettre({ offre = {}, profilCv = "", candidat = {}, consign
     "- N'invente AUCUNE anciennete et AUCUN chiffre. Le poste actuel a commence en mars 2026.",
     "  Ne dis jamais deux ans, ni un an et demi, ni aucune duree absente du profil.",
     "- N'invente ni diplome, ni technologie, ni client, ni resultat qui ne soit pas dans le profil.",
+    "- Le candidat n'a JAMAIS travaille a distance. Le full remote et la mobilite sont une",
+    "  DISPONIBILITE, pas une pratique actuelle : ne dis jamais qu'il travaille deja en remote,",
+    "  ni que son poste actuel l'est. Si le lieu compte, dis qu'il est pret a demenager.",
     "- INTERDIT : le tiret cadratin et le tiret demi-cadratin. Mets une virgule.",
     "- INTERDIT : le markdown et les balises HTML.",
     "- " + MAX_MOTS + " mots maximum pour le corps : la lettre doit tenir sur UNE page.",
@@ -118,6 +149,9 @@ export function parseLettre(brut) {
   }
   if (dureeInventee(corps)) {
     throw new Error("une duree chiffree a survecu au nettoyage : " + corps.slice(0, 160));
+  }
+  if (teletravailInvente(corps)) {
+    throw new Error("la lettre affirme un teletravail actuel, qui n'existe pas : " + corps.slice(0, 160));
   }
 
   return {
