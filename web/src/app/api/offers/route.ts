@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { cheminJournalOffres } from "@/lib/offers-journal";
-import { etatCourant, lignesAAjouter, parseJournal } from "@/lib/offers-store.mjs";
+import { etatCourant, lignesAAjouter, lignesNonRetenues, parseJournal } from "@/lib/offers-store.mjs";
 import { dedoublonneOffres } from "@/lib/offres-dedup";
 
 export const runtime = "nodejs";
@@ -40,13 +40,27 @@ export async function POST(req: Request) {
     return Response.json({ error: "json invalide" }, { status: 400 });
   }
 
-  const { lignes, ecartees } = lignesAAjouter(corps, new Date().toISOString());
+  const maintenant = new Date().toISOString();
+  const { lignes, ecartees } = lignesAAjouter(corps, maintenant);
 
-  // Zéro offre n'est PAS une erreur : une tournée peut ne rien ramener. On le
-  // dit explicitement pour que n8n distingue « rien trouvé » de « appel raté ».
-  if (lignes.length === 0) {
-    return Response.json({ ajoutees: 0, ecartees, vide: true });
-  }
+  // Les offres jugées mais NON retenues : sous le plancher de score, ou jamais
+  // citées par le tri. Elles sont inscrites au journal avec le statut
+  // `NON_RETENUE` — donc masquées de l'app ET écartées du prochain lot.
+  //
+  // Sans cette inscription, elles revenaient à CHAQUE tournée : 90 offres sur 150
+  // le 2026-08-10, resoumises au modèle pour un verdict identique, en occupant des
+  // places que des offres neuves n'avaient plus.
+  //
+  // Écrites HORS du dédoublonnage par URL, qui existe pour empêcher de candidater
+  // deux fois : une offre non retenue n'a pas de candidature, la question ne se
+  // pose pas.
+  const nonRetenues = lignesNonRetenues(
+    Array.isArray((corps as { nonRetenues?: unknown[] }).nonRetenues)
+      ? ((corps as { nonRetenues?: unknown[] }).nonRetenues as [])
+      : [],
+    maintenant,
+    { source: corps.source, executionId: corps.executionId },
+  );
 
   // Fusion des deux files de triage. Avant, n8n et le scanner local
   // s'ignoraient : la même annonce pouvait s'afficher des deux côtés, et chacun
@@ -59,36 +73,45 @@ export async function POST(req: Request) {
   // NON bloquant. Si le registre est injoignable on écrit quand même le lot :
   // perdre une tournée entière serait pire qu'un doublon, et l'erreur est
   // remontée dans la réponse plutôt qu'avalée.
-  const dedup = await dedoublonneOffres(lignes);
+  const dedup = lignes.length > 0 ? await dedoublonneOffres(lignes) : { deja: [], erreur: null };
   const dejaVues = new Set(dedup.deja);
   const aEcrire = dedup.erreur ? lignes : lignes.filter((l) => !dejaVues.has(String(l.url ?? "")));
 
-  if (aEcrire.length === 0) {
-    return Response.json({
-      ajoutees: 0,
-      ecartees,
-      dejaVues: dedup.deja.length,
-      vide: true,
-      message: "toutes les offres du lot étaient déjà connues d'une autre source",
-    });
-  }
-
+  // UNE SEULE écriture, retenues ET non retenues.
+  //
+  // Le piège évité ici : les deux sorties anticipées d'avant (« aucune ligne » et
+  // « tout était déjà connu ») rendaient AVANT d'inscrire les non retenues. Or une
+  // tournée qui ne retient rien est précisément celle où il faut se souvenir de ce
+  // qui a été jugé — sinon le mécanisme ne sert jamais quand il est le plus utile,
+  // et le lendemain le tri repaye les mêmes 150 offres.
+  const toutes = [...aEcrire, ...nonRetenues];
   const p = journalPath();
-  try {
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.appendFileSync(p, aEcrire.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf8");
-  } catch (e) {
-    return Response.json(
-      { error: e instanceof Error ? e.message : "ecriture du journal impossible" },
-      { status: 500 },
-    );
+  if (toutes.length > 0) {
+    try {
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.appendFileSync(p, toutes.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf8");
+    } catch (e) {
+      return Response.json(
+        { error: e instanceof Error ? e.message : "ecriture du journal impossible" },
+        { status: 500 },
+      );
+    }
   }
 
   return Response.json({
     ajoutees: aEcrire.length,
+    nonRetenues: nonRetenues.length,
     ecartees,
     dejaVues: dedup.deja.length,
     dedupErreur: dedup.erreur,
+    // Zéro offre retenue n'est PAS une erreur : une tournée peut ne rien ramener
+    // qui vaille la peine. On le dit explicitement pour que n8n distingue « rien
+    // trouvé » de « appel raté ».
+    vide: aEcrire.length === 0,
+    message:
+      aEcrire.length === 0 && dedup.deja.length > 0
+        ? "toutes les offres du lot étaient déjà connues d'une autre source"
+        : undefined,
     journal: p,
   });
 }
