@@ -25,6 +25,8 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import {
   BUDGET_CAR_RENDUS,
+  PLANCHER_CAR_RENDUS,
+  RATIO_MIN,
   carRendus,
   cheminsCvYaml,
   clesTopNiveau,
@@ -289,17 +291,50 @@ test("le budget laisse passer un CV effectivement selectionne", () => {
 });
 
 test("le budget une page et le garde-fou anti-troncature ne se contredisent pas", () => {
-  // Le mandat de coupe ne doit pas pousser un CV légitime sous RATIO_MIN. Mesuré
-  // sur le vrai locales/fr.yml : le pire cas donne 0.59, au-dessus de 0.50.
-  // Ce test fige le raisonnement pour que baisser le budget ne le casse pas en
-  // silence.
-  assert.ok(BUDGET_CAR_RENDUS > 0);
-  const rendusOrigineReelle = 8250; // locales/fr.yml sur main, 2026-08-10
-  const coupeMax = rendusOrigineReelle - BUDGET_CAR_RENDUS;
-  const totalOrigineReelle = 12535;
-  const commentaires = 2425;
-  const ratioPireCas = (totalOrigineReelle - commentaires - coupeMax) / totalOrigineReelle;
-  assert.ok(ratioPireCas > 0.5, `le pire cas ${ratioPireCas.toFixed(2)} tomberait sous RATIO_MIN`);
+  // Ce test figeait un MODELE, et la realite l'a démenti le 2026-08-11. Il est
+  // désormais ancré sur une mesure : le premier CV réellement adapté puis rendu
+  // (branche cv/devoteam-lead-ia-agentic-h-f-senior-973518) pesait 6 370 octets
+  // pour 12 535 à l'origine, soit un ratio de 0.51 — à un cheveu de l'ancien
+  // RATIO_MIN de 0.50. Le modèle se trompait deux fois : il supposait que l'agent
+  // garderait les commentaires du gabarit (75 caractères conservés sur 2 425), et
+  // il comptait la coupe en caractères rendus alors que retirer une puce emporte
+  // aussi son marqueur de bloc et son indentation.
+  const OCTETS_ORIGINE = 12535; // locales/fr.yml sur main
+  const OCTETS_ADAPTE_MESURE = 6370; // rendu réel, budget de 5 500 alors en vigueur
+  const RENDUS_ADAPTE_MESURE = 5068;
+
+  // À budget plus serré, le fichier rétrécit encore. Estimation prudente : chaque
+  // caractère rendu retiré emporte au moins autant d'octets de gabarit.
+  const octetsAttendus = OCTETS_ADAPTE_MESURE - (RENDUS_ADAPTE_MESURE - BUDGET_CAR_RENDUS);
+  const ratioAttendu = octetsAttendus / OCTETS_ORIGINE;
+
+  assert.ok(
+    ratioAttendu > RATIO_MIN,
+    `au budget ${BUDGET_CAR_RENDUS} le ratio attendu est ${ratioAttendu.toFixed(2)}, ` +
+      `il doit rester au-dessus de RATIO_MIN=${RATIO_MIN} sinon les deux garde-fous se battent`,
+  );
+  // Et la marge doit être réelle, pas symbolique : c'est ce qui a manqué la
+  // première fois.
+  assert.ok(ratioAttendu - RATIO_MIN > 0.1, `marge trop mince : ${(ratioAttendu - RATIO_MIN).toFixed(2)}`);
+});
+
+test("le budget reste sous la plus petite capacite de page observee", () => {
+  // Capacités mesurées sur le gabarit Typst : 4 982 caractères rendus pour un CV
+  // adapté, 5 895 pour le réservoir. La capacité dépend de la mise en page, donc
+  // le budget doit passer sous la PLUS BASSE, avec de la marge.
+  const CAPACITE_LA_PLUS_BASSE = 4982 * 0.989; // ramenée en unités carRendus
+  assert.ok(
+    BUDGET_CAR_RENDUS < CAPACITE_LA_PLUS_BASSE,
+    `budget ${BUDGET_CAR_RENDUS} au-dessus de la capacite observee ${Math.round(CAPACITE_LA_PLUS_BASSE)}`,
+  );
+  assert.ok(BUDGET_CAR_RENDUS > PLANCHER_CAR_RENDUS, "le budget doit laisser de la place au-dessus du plancher");
+});
+
+test("REFUS : un CV vide de sa substance, meme sous le budget", () => {
+  const maigre = ORIGINAL.replace("keywords: []", 'keywords: ["IA"]');
+  const r = verifieCvAdapte({ original: RESERVOIR, adapte: maigre });
+  assert.equal(r.ok, false);
+  assert.match(r.motif, /trop maigre|volume anormal/);
 });
 
 // ── chemins de travail ──────────────────────────────────────────────────────

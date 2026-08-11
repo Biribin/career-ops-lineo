@@ -36,14 +36,23 @@
 import path from "node:path";
 
 /**
- * Au-delà, `tools/build_letter.py` et le rendu une page cassent.
+ * Bornes de volume, en proportion du CV d'origine.
  *
- * `RATIO_MIN` reste à 0.5 malgré le mandat de coupe ajouté le 2026-08-10 : le
- * pire cas mesuré (commentaires retirés ET budget atteint sur `locales/fr.yml`)
- * donne 0.59, donc le garde-fou anti-troncature survit sans être affaibli. Ne le
- * baisse pas « au cas où » : il vient d'un incident réel.
+ * `RATIO_MIN` était à 0.5, calculé sur un modèle que la réalité a démenti le
+ * 2026-08-11. Premier CV réellement adapté et rendu : **ratio 0.51**, à un
+ * cheveu du refus. Deux erreurs dans mon modèle : je supposais que l'agent
+ * garderait les commentaires du gabarit (il en a laissé 75 caractères sur
+ * 2 425), et je comptais la coupe en caractères RENDUS alors que retirer une
+ * puce emporte aussi son marqueur de bloc et son indentation.
+ *
+ * Le mandat de coupe rend donc ce garde-fou contre-productif : viser une page
+ * impose de retirer 40 à 50 % du fichier, et 0.5 l'interdisait. Il devient un
+ * simple filet contre une troncature catastrophique. Le vrai plancher de
+ * contenu, lui, est `PLANCHER_CAR_RENDUS` : il porte sur ce qui s'imprime, pas
+ * sur un ratio d'octets face à un réservoir dont la taille n'a aucun rapport
+ * avec ce qu'un recruteur doit lire.
  */
-export const RATIO_MIN = 0.5;
+export const RATIO_MIN = 0.3;
 export const RATIO_MAX = 1.5;
 
 /**
@@ -56,17 +65,42 @@ export const RATIO_MAX = 1.5;
  * c'est ici qu'on choisit ce qui part chez un recruteur. Le CV de base ne doit
  * PAS être dégraissé pour arranger le rendu.
  *
- * LE CHIFFRE EST MESURÉ, PAS DEVINÉ. Sur le gabarit Typst du repo `cv`, au
- * 2026-08-10 :
- *   - `dist/pdf/cv-fr-ats.pdf` — le seul PDF que n8n télécharge et envoie
- *     (workflow 2, `Config.githubPdfPath`) — portait 5 895 caractères rendus sur
- *     sa page 1 avant de déborder ;
- *   - `carRendus` sous-estime le rendu réel d'environ 1,5 % : le gabarit ajoute
- *     ses propres intitulés de section, que le YAML ne contient pas.
- * 5 500 laisse ~7 % de marge, et cette marge compte : un retour à la ligne se
- * joue au mot près, pas au caractère près.
+ * LE CHIFFRE EST MESURÉ SUR UN RENDU RÉEL, et il a déjà été corrigé une fois.
+ *
+ * Première calibration (2026-08-10), à 5 500 : déduite de la page 1 du CV
+ * réservoir, qui portait 5 895 caractères rendus avant de déborder. **Ce
+ * raisonnement était faux** : la capacité d'une page dépend de la MISE EN PAGE,
+ * pas seulement du nombre de caractères. Le réservoir empile beaucoup de puces
+ * courtes ; un CV adapté a moins d'entrées mais plus longues, et davantage
+ * d'intitulés de section au prorata, donc il remplit la page plus vite.
+ *
+ * Mesure du 2026-08-11, premier CV réellement adapté puis rendu
+ * (`cv/devoteam-lead-ia-agentic-h-f-senior-973518`) :
+ *   - 5 068 caractères estimés, donc SOUS l'ancien budget de 5 500 ;
+ *   - et pourtant deux pages : la page 1 n'a tenu que 4 982 caractères rendus,
+ *     le débordement était de 139 caractères (fin du plan de formation, langues,
+ *     permis) ;
+ *   - `carRendus` colle au rendu réel à ~1 % près (5 068 estimés pour 5 121).
+ *
+ * La capacité observée va donc de ~4 980 à ~5 900 selon la mise en page. Le
+ * budget doit passer sous la PLUS BASSE des deux : 4 600 laisse ~7 % de marge
+ * sous 4 927 (4 982 ramenés en unités estimées). Cette marge compte, un retour à
+ * la ligne se joue au mot près.
+ *
+ * SI ÇA DÉBORDE ENCORE : baisser ce chiffre, pas dégraisser le CV de base. Le
+ * gate de l'Action dans le repo `cv` le dit aussi, et c'est lui l'arbitre final.
  */
-export const BUDGET_CAR_RENDUS = 5500;
+export const BUDGET_CAR_RENDUS = 4600;
+
+/**
+ * Plancher de contenu rendu. Un CV sous ce seuil n'est pas « bien coupé », il est
+ * vidé : la page ferait presque la moitié de sa capacité (~4 900 caractères).
+ *
+ * Ce plancher remplace le rôle que `RATIO_MIN` ne peut plus jouer depuis que la
+ * coupe est mandatée. Il a l'avantage de porter sur ce qu'un recruteur lit, pas
+ * sur un rapport d'octets avec un réservoir dont la taille est arbitraire.
+ */
+export const PLANCHER_CAR_RENDUS = 3000;
 
 /**
  * Estime les caractères RENDUS d'un CV YAML : la somme des valeurs qui
@@ -281,6 +315,22 @@ export function verifieCvAdapte({ original, adapte }) {
         `${BUDGET_CAR_RENDUS} au budget, soit ${rendus - BUDGET_CAR_RENDUS} à retirer. ` +
         `L'agent doit SÉLECTIONNER (projets redondants, puces hors sujet, formations et extras ` +
         `sans rapport avec l'offre), pas seulement reformuler`,
+    };
+  }
+  // L'autre bord : un CV vidé. Depuis que la coupe est mandatée, c'est ce
+  // plancher qui protège, pas le ratio d'octets face au réservoir.
+  //
+  // Il est PLAFONNÉ par ce que l'original contenait : exiger 3 000 caractères
+  // rendus d'une source qui n'en a que 400 serait absurde, et rendrait le module
+  // inutilisable sur un CV de base plus court. On demande donc « le plancher, ou
+  // la moitié de la source si elle est plus petite ».
+  const plancher = Math.min(PLANCHER_CAR_RENDUS, Math.floor(carRendus(src) / 2));
+  if (rendus < plancher) {
+    return {
+      ok: false,
+      motif:
+        `le CV adapté est trop maigre : ${rendus} caractères rendus pour un plancher de ` +
+        `${plancher}. Couper pour tenir sur une page ne veut pas dire vider le CV`,
     };
   }
 
