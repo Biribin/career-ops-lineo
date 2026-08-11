@@ -210,13 +210,28 @@ for p in cv.md:cv.md portals.yml:portals.yml config/profile.yml:profile.yml mode
 done
 ```
 
-> ⚠️ **Limite connue.** Une écriture *atomique* de l'app
-> (`web/src/lib/core/safe-write.ts` : write-temp + `rename`) **remplace le lien par
-> un fichier réel**, qui vit alors dans la couche du conteneur et disparaît au
-> redéploiement suivant. Concerne l'upload de CV et les « notes durables » écrites
-> dans `modes/_profile.md`. La source de vérité de ces quatre fichiers reste
-> `career-ops-data` + le volume ; après une modification faite depuis l'app, la
-> recopier dans `/app/data/perso/`.
+> **Les écritures de l'app vont sur le volume, sans rien à recopier.**
+> `web/src/lib/core/safe-write.ts` résout le lien **avant** d'écrire
+> (`chemin-reel.mjs`) : le fichier temporaire naît dans `/app/data/perso/` et le
+> `rename` s'y fait, donc le lien reste un lien et la modification survit au
+> redéploiement. Les sauvegardes `.bak-*` atterrissent au même endroit, pour la
+> même raison.
+>
+> C'était une limite jusqu'au 2026-08-11 : le `rename` se faisait *sur* le lien
+> et le remplaçait par un fichier réel de la couche conteneur. L'écriture
+> réussissait, l'app confirmait, et la modification disparaissait au
+> redéploiement suivant — sans le moindre message. Concernait l'upload de CV, les
+> « notes durables » de `modes/_profile.md`, et l'ajout d'entreprises à
+> `portals.yml`.
+>
+> ⚠️ Vaut pour l'app **et** pour les scripts du cœur qu'elle lance, à condition
+> qu'on leur donne le vrai chemin : `/api/portals/track` passe à
+> `discover-ats.mjs` un `CAREER_OPS_PORTALS` déjà résolu, parce que le cœur, lui,
+> renomme toujours sur le chemin qu'on lui donne. Un script du cœur lancé À LA
+> MAIN sur `/app/portals.yml` (`node discover-ats.mjs … --write`) casse encore le
+> lien : viser `/app/data/perso/portals.yml`.
+>
+> `career-ops-data` + le volume restent la source de vérité pour la sauvegarde.
 
 ## Vérification (fait le 2026-08-05)
 

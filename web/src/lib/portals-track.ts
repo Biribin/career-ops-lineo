@@ -77,10 +77,9 @@ export function entreprisesSuivies(): EntrepriseSuivie[] {
  * lignes de commentaires du fichier survivent à l'ajout, contrairement à un
  * aller-retour yaml.load/yaml.dump.
  *
- * ⚠️ Persistance : atomicWriteWithBackup fait un rename → il REMPLACE le lien
- * symbolique du volume par un fichier réel de la couche conteneur (limitation
- * connue, cf. DEPLOY-VPS.md). La source de vérité reste `career-ops-data` + le
- * volume ; recopier portals.yml dans /app/data/perso/ après coup si besoin.
+ * Persistance : rien à recopier à la main. atomicWriteWithBackup résout le lien
+ * symbolique du volume avant d'écrire (chemin-reel.mjs), donc l'ajout atterrit
+ * dans /app/data/perso/ et survit au redéploiement. Cf. DEPLOY-VPS.md.
  */
 export function ajouterEntrepriseSuivie(entree: NouvelleEntree): PortailTrackResult {
   const name = (entree.name || "").trim();

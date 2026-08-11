@@ -16,10 +16,14 @@
 # l'a (installation locale complete), on amorce le volume depuis /app au lieu
 # d'ecraser quoi que ce soit.
 #
-# ATTENTION : une ecriture ATOMIQUE de l'app (web/src/lib/core/safe-write.ts fait
-# write-temp + rename) REMPLACE le lien par un fichier reel. Ce fichier vit alors
-# dans la couche du conteneur et disparait au redeploy suivant. La source de
-# verite de ces quatre fichiers reste le volume ; voir DEPLOY-VPS.md.
+# Les ecritures de l'app suivent ces liens : safe-write.ts resout la cible AVANT
+# d'ecrire (chemin-reel.mjs), donc le temporaire et le rename se font dans $PERSO
+# et le lien reste un lien. Jusqu'au 2026-08-11 le rename se faisait SUR le lien
+# et le remplacait par un fichier reel de la couche conteneur : l'ecriture
+# reussissait et disparaissait au redeploy suivant, sans un mot.
+#
+# ATTENTION quand meme : un script du coeur lance A LA MAIN qui renomme sur /app
+# (par ex. `node discover-ats.mjs --write`) casse toujours le lien. Viser $PERSO.
 
 set -e
 

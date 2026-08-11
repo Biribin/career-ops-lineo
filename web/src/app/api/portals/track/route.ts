@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { ajouterEntrepriseSuivie, cheminPortals, entreprisesSuivies } from "@/lib/portals-track";
 import { entreeExistante } from "@/lib/portails-suivies.mjs";
+import { cheminReel } from "@/lib/core/chemin-reel.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,7 +76,13 @@ async function sonderBoardsPublics(nom: string): Promise<Sonde> {
         // Le cœur résout portals.yml depuis SON dossier ; on le pointe
         // explicitement sur le fichier que l'app lit, pour qu'un
         // CAREER_OPS_ROOT de développement n'écrive pas ailleurs.
-        env: { ...process.env, CAREER_OPS_PORTALS: cheminPortals() },
+        //
+        // Et sur la CIBLE du lien, pas sur le lien : discover-ats.mjs finit lui
+        // aussi par un `rename`, qui remplacerait `/app/portals.yml` par un
+        // fichier réel de la couche conteneur — l'entreprise ajoutée
+        // disparaîtrait au redéploiement suivant. Le cœur n'a pas à connaître
+        // notre montage : on lui donne le vrai chemin (voir chemin-reel.mjs).
+        env: { ...process.env, CAREER_OPS_PORTALS: cheminReel(cheminPortals()) },
       },
       (_e, out) => resolve(out || ""),
     );
