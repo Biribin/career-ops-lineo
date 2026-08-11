@@ -278,19 +278,23 @@ test("le reservoir de depart depasse bien le budget une page", () => {
   assert.ok(carRendus(RESERVOIR) > BUDGET_CAR_RENDUS, "fixture inutile si le reservoir tient deja sur une page");
 });
 
-test("REFUS : un CV adapte qui deborde sur une deuxieme page", () => {
-  // L'incident du 2026-08-10, à l'identique : l'agent remplit `keywords` et ne
-  // retire rien. Toutes les clés sont là, les dates sont intactes, rien n'est
-  // inventé, le volume est dans le ratio (il n'a quasiment pas bougé) : SEUL le
-  // budget une page trahit le CV que l'agent n'a pas su couper.
+test("un CV trop long PASSE, mais il est signale", () => {
+  // Changement de doctrine du 2026-08-11. Le budget en caractères a bloqué quatre
+  // candidatures d'affilée sans qu'aucun CV ne sorte, alors que ce n'est qu'un
+  // proxy : la capacité d'une page dépend de la mise en page. La tenue sur une
+  // page est désormais GARANTIE en aval, par tools/fit_one_page.py dans le repo
+  // cv, qui rend puis retire le moins utile jusqu'à ce que ça tienne.
+  //
+  // Ce test fige la conséquence : ce module ne refuse plus un CV pour sa
+  // longueur, il le signale. Ne pas le « recorriger » en refus, ce serait
+  // rebloquer la génération sur un proxy.
   const commeLIncident = RESERVOIR.replace("keywords: []", 'keywords: ["IA", "LLM"]');
   const r = verifieCvAdapte({ original: RESERVOIR, adapte: commeLIncident });
-  assert.equal(r.ok, false);
-  assert.match(r.motif, /ne tient pas sur une page/);
-  assert.match(r.motif, /SÉLECTIONNER/);
-  // Le motif doit dire COMBIEN retirer : c'est ce qui le rend exploitable.
-  assert.match(r.motif, new RegExp(`${BUDGET_CAR_RENDUS} au budget`));
-  assert.match(r.motif, /\d+ à retirer/);
+  assert.equal(r.ok, true, r.motif);
+  assert.ok(carRendus(r.adaptedYaml) > BUDGET_CAR_RENDUS, "le fixture doit bien depasser la cible");
+  const avert = r.avertissements.join(" | ");
+  assert.match(avert, /dépasse la cible d'une page/);
+  assert.match(avert, /le rendu retirera lui-même le moins utile/);
 });
 
 test("un CV reellement selectionne dans le reservoir passe", () => {

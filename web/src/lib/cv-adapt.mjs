@@ -343,16 +343,6 @@ export function verifieCvAdapte({ original, adapte }) {
   // le rejette. Échouer ici fait gagner le rendu (environ cinq minutes) et rend
   // un motif exploitable au lieu d'un log d'Action à déchiffrer.
   const rendus = carRendus(yamlText);
-  if (rendus > BUDGET_CAR_RENDUS) {
-    return {
-      ok: false,
-      motif:
-        `le CV adapté ne tient pas sur une page : ${rendus} caractères rendus contre ` +
-        `${BUDGET_CAR_RENDUS} au budget, soit ${rendus - BUDGET_CAR_RENDUS} à retirer. ` +
-        `L'agent doit SÉLECTIONNER (projets redondants, puces hors sujet, formations et extras ` +
-        `sans rapport avec l'offre), pas seulement reformuler`,
-    };
-  }
   // L'autre bord : un CV vidé. Depuis que la coupe est mandatée, c'est ce
   // plancher qui protège, pas le ratio d'octets face au réservoir.
   //
@@ -372,6 +362,23 @@ export function verifieCvAdapte({ original, adapte }) {
 
   // Non bloquant mais remonté : ce sont les signes d'un modèle qui a peu travaillé.
   const avertissements = [];
+  // Le budget est une INDICATION, plus un refus. Décision du 2026-08-11 : il a
+  // bloqué quatre candidatures d'affilée sans qu'aucun CV ne sorte, alors que
+  // c'est un proxy — la capacité d'une page dépend de la mise en page, donc aucun
+  // budget ne peut être juste à coup sûr. La tenue sur une page est désormais
+  // GARANTIE en aval par `tools/fit_one_page.py` dans le repo `cv` : il rend,
+  // compte les pages, et retire le moins utile jusqu'à ce que ça tienne. Typst
+  // tranche, et il a toujours raison sur sa propre pagination.
+  //
+  // On garde le chiffre comme cible dans le prompt et comme avertissement ici :
+  // plus l'agent s'en approche, moins le script aval a besoin de couper à sa
+  // place, et mieux la sélection éditoriale reste dans les mains du modèle.
+  if (rendus > BUDGET_CAR_RENDUS) {
+    avertissements.push(
+      `le CV dépasse la cible d'une page de ${rendus - BUDGET_CAR_RENDUS} caractères ` +
+        `(${rendus} contre ${BUDGET_CAR_RENDUS}) : le rendu retirera lui-même le moins utile`,
+    );
+  }
   if (yamlText.trim() === src.trim()) avertissements.push("le CV rendu est identique à l'original : aucune adaptation");
   return { ok: true, adaptedYaml: yamlText, avertissements };
 }
