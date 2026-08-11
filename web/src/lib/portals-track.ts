@@ -1,8 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import {
+  entreeExistante,
+  insererDansTrackedCompanies,
+  lireEntreprisesSuivies,
+  rendreEntree,
+} from "@/lib/portails-suivies.mjs";
 
 export type PortailTrackResult = {
   /** true = entreprise ajoutée à tracked_companies à l'instant */
@@ -12,74 +17,108 @@ export type PortailTrackResult = {
   erreur: string | null;
 };
 
-function isObj(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === "object" && !Array.isArray(v);
+/** Une entrée du réseau public des ATS, telle que portals.yml la décrit. */
+export type EntrepriseSuivie = {
+  nom: string;
+  careers_url: string;
+  api: string;
+  enabled: boolean;
+  /** Ajoutée par l'app, ATS pas encore trouvé — à distinguer d'une entreprise
+   *  désactivée volontairement, qui est aussi `enabled: false`. */
+  enAttente: boolean;
+  notes: string;
+};
+
+/** Ce qu'on veut inscrire dans `tracked_companies`. */
+export type NouvelleEntree = {
+  name: string;
+  careers_url?: string;
+  api?: string;
+  provider?: string;
+  enabled?: boolean;
+  enAttente?: boolean;
+  notes?: string;
+};
+
+export function cheminPortals(): string {
+  return path.join(careerOpsRoot(), "portals.yml");
 }
 
-/** Normalise pour dédup : sans accents, sans casse, espaces réduits. */
-function norm(s: string): string {
-  return s
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "") // diacritiques combinants
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+/** Le texte de portals.yml, ou à défaut celui du modèle livré — pour qu'un
+ *  premier ajout parte du fichier d'exemple (et de ses commentaires) plutôt que
+ *  d'un document nu. Aucun des deux → chaîne vide, l'insertion créera le bloc. */
+function lireTextePortals(): string {
+  for (const p of [cheminPortals(), path.join(careerOpsRoot(), "templates", "portals.example.yml")]) {
+    try {
+      return fs.readFileSync(p, "utf8");
+    } catch {
+      /* fichier suivant */
+    }
+  }
+  return "";
+}
+
+/** Les entreprises du réseau public des ATS, activées ou en attente. */
+export function entreprisesSuivies(): EntrepriseSuivie[] {
+  try {
+    return lireEntreprisesSuivies(fs.readFileSync(cheminPortals(), "utf8"));
+  } catch {
+    return []; // pas encore de portals.yml : rien de suivi, ce n'est pas une erreur
+  }
 }
 
 /**
- * Ajoute une entreprise à `tracked_companies` de portals.yml — appelé quand Lineo
- * VALIDE l'envoi d'une candidature, pour que career-ops surveille désormais cette
- * entreprise (elle apparaît alors sur la page Portails).
+ * Ajoute une entreprise à `tracked_companies` de portals.yml.
  *
- * Idempotent : dédup par nom (insensible casse/accents), aucun doublon.
+ * Idempotent : dédup par nom (insensible casse/accents) ET par URL de board,
+ * donc deux graphies du même employeur ne créent pas deux entrées.
  *
- * `enabled: false` VOLONTAIRE : sans careers_url vérifié, le scanner sauterait
- * l'entrée (scan.mjs ~l.2088 `if (entry.enabled === false) continue;`) — donc
- * zéro risque de casser un scan ou de déclencher la suppression « lien mort » de
- * la page Portails. On garde l'URL de l'offre en indice ; Lineo (ou le flux
- * /api/run « fix-portal ») complète le vrai careers_url puis passe enabled: true.
+ * L'écriture est un DÉCOUPAGE DE TEXTE (voir portails-suivies.mjs) : les 2000
+ * lignes de commentaires du fichier survivent à l'ajout, contrairement à un
+ * aller-retour yaml.load/yaml.dump.
  *
  * ⚠️ Persistance : atomicWriteWithBackup fait un rename → il REMPLACE le lien
  * symbolique du volume par un fichier réel de la couche conteneur (limitation
  * connue, cf. DEPLOY-VPS.md). La source de vérité reste `career-ops-data` + le
  * volume ; recopier portals.yml dans /app/data/perso/ après coup si besoin.
  */
-export function trackCompanyInPortals(entreprise: string, urlOffre?: string): PortailTrackResult {
-  const name = (entreprise || "").trim();
-  if (!name) return { applique: false, deja: false, erreur: "fiche sans entreprise : rien à suivre" };
+export function ajouterEntrepriseSuivie(entree: NouvelleEntree): PortailTrackResult {
+  const name = (entree.name || "").trim();
+  if (!name) return { applique: false, deja: false, erreur: "nom d'entreprise vide : rien à suivre" };
 
-  const root = careerOpsRoot();
-  const file = path.join(root, "portals.yml");
-
-  // Lire portals.yml ; s'il n'existe pas encore, partir de l'exemple pour ne pas
-  // perdre les autres blocs (title_filter, location_filter…) au premier ajout.
-  let doc: Record<string, unknown> = {};
-  try {
-    doc = (yaml.load(fs.readFileSync(file, "utf8")) as Record<string, unknown>) || {};
-  } catch {
-    try {
-      doc = (yaml.load(fs.readFileSync(path.join(root, "templates", "portals.example.yml"), "utf8")) as Record<string, unknown>) || {};
-    } catch {
-      doc = {};
-    }
+  const texte = lireTextePortals();
+  if (entreeExistante(lireEntreprisesSuivies(texte), { ...entree, name })) {
+    return { applique: false, deja: true, erreur: null };
   }
 
-  const companies = Array.isArray(doc.tracked_companies) ? [...(doc.tracked_companies as unknown[])] : [];
-  const already = companies.some((c) => isObj(c) && typeof c.name === "string" && norm(c.name) === norm(name));
-  if (already) return { applique: false, deja: true, erreur: null };
-
-  companies.push({
-    name,
-    careers_url: (urlOffre || "").trim(),
-    enabled: false,
-    notes: "Ajouté automatiquement depuis une candidature validée. Compléter careers_url puis passer enabled: true.",
-  });
-  doc.tracked_companies = companies;
-
   try {
-    atomicWriteWithBackup(file, yaml.dump(doc, { lineWidth: 100, noRefs: true }));
+    const snippet = rendreEntree({ ...entree, name });
+    atomicWriteWithBackup(cheminPortals(), insererDansTrackedCompanies(texte, [snippet]));
   } catch (e) {
     return { applique: false, deja: false, erreur: e instanceof Error ? e.message : "écriture de portals.yml impossible" };
   }
   return { applique: true, deja: false, erreur: null };
+}
+
+/**
+ * Ajoute une entreprise suivie depuis une candidature VALIDÉE (page « À
+ * valider ») — pour que career-ops surveille désormais cette entreprise.
+ *
+ * `enabled: false` VOLONTAIRE : sans careers_url vérifié, le scanner sauterait
+ * l'entrée (scan.mjs ~l.2088 `if (entry.enabled === false) continue;`) — donc
+ * zéro risque de casser un scan ou de déclencher la suppression « lien mort »
+ * de la page Portails. On garde l'URL de l'offre en indice ; le bouton
+ * « Trouver l'ATS » de la page Portails (ou /api/portals/track) complète le vrai
+ * careers_url puis passe enabled: true.
+ */
+export function trackCompanyInPortals(entreprise: string, urlOffre?: string): PortailTrackResult {
+  const name = (entreprise || "").trim();
+  if (!name) return { applique: false, deja: false, erreur: "fiche sans entreprise : rien à suivre" };
+  return ajouterEntrepriseSuivie({
+    name,
+    careers_url: (urlOffre || "").trim(),
+    enabled: false,
+    enAttente: true,
+    notes: "Ajouté automatiquement depuis une candidature validée. Compléter careers_url puis passer enabled: true.",
+  });
 }

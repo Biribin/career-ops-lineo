@@ -65,9 +65,9 @@ Do NOT run generate-pdf.mjs yourself and do NOT render a PDF — the platform re
 End with EXACTLY one final line: VERDICT: {5 if the HTML and format file were written, else 1}/5 — {a one-line summary, ≤12 words}`;
   }
   if (kind === "fix-portal") {
-    return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
+    return `A company in portals.yml is not scannable — either its ATS slug is BROKEN, or it was added from a job offer and still has no working careers_url (it sits there with \`enabled: false\`). Either way career-ops never scans it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
 1. Run \`node verify-portals.mjs --add "${input}"\` — it probes Greenhouse/Ashby/Lever for the company's correct ATS slug and prints the suggested ats + slug.
-2. Open portals.yml, find the "${input}" entry under tracked_companies, and update its careers_url (and any api/slug field) to the suggested WORKING ATS URL. Change ONLY this one company; preserve all other YAML structure, comments and formatting exactly.
+2. Open portals.yml, find the "${input}" entry under tracked_companies, and update its careers_url (and any api/slug field) to the suggested WORKING ATS URL. If that entry has \`enabled: false\`, set it to \`true\` (and drop its \`en_attente_ats: true\` line, if any) — otherwise verify-portals skips it entirely and step 3 can never pass. Change ONLY this one company; preserve all other YAML structure, comments and formatting exactly.
 3. Re-run \`node verify-portals.mjs\` and confirm "${input}" now shows ✅ live (not ❌).
 If NO slug variant resolves, say so clearly and leave portals.yml unchanged. Never touch any other company.
 

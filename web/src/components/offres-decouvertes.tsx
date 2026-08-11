@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Hand, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
+import Link from "next/link";
+import { Hand, Loader2, Radar, RefreshCw, Sparkles, X } from "lucide-react";
 import { LancerRechercheBouton } from "@/components/lancer-recherche-bouton";
 
 // Les offres rapportées par le workflow n8n « 1. Decouverte des offres », avec
@@ -24,12 +25,24 @@ type Offre = {
   vu_le?: string;
 };
 
+/** Clé de suivi par ENTREPRISE, pas par offre : deux annonces du même employeur
+ *  doivent basculer ensemble, sinon on croit pouvoir l'ajouter deux fois. */
+const cleEntreprise = (nom?: string) =>
+  (nom || "")
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
 export function OffresDecouvertes() {
   const [offres, setOffres] = useState<Offre[]>([]);
   const [chargement, setChargement] = useState(true);
   // jobId en cours de traitement, et le dernier message (succès ou échec).
   const [enCours, setEnCours] = useState<string | null>(null);
   const [avis, setAvis] = useState<{ ton: "ok" | "erreur"; texte: string } | null>(null);
+  // État du suivi par entreprise (réseau public des ATS).
+  const [suivi, setSuivi] = useState<Record<string, "encours" | "suivie" | "attente">>({});
 
   const charger = useCallback(() => {
     setChargement(true);
@@ -104,6 +117,43 @@ export function OffresDecouvertes() {
     }
   }, []);
 
+  // Suivre l'EMPLOYEUR, pas l'offre : son ATS entre dans portals.yml et sa page
+  // carrières est relue à chaque tournée. L'annonce France Travail expirera ;
+  // l'entreprise, elle, continuera de recruter. La carte reste en place — c'est
+  // une action sur l'entreprise, pas une décision sur l'offre.
+  const suivre = useCallback(async (offre: Offre) => {
+    const cle = cleEntreprise(offre.company);
+    if (!cle) return;
+    setSuivi((s) => ({ ...s, [cle]: "encours" }));
+    setAvis(null);
+    try {
+      const rep = await fetch("/api/portals/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entreprise: offre.company, url: offre.url }),
+      });
+      const j = (await rep.json()) as { ok?: boolean; statut?: string; message?: string; error?: string };
+      if (!rep.ok || !j.ok) {
+        setSuivi((s) => {
+          const copie = { ...s };
+          delete copie[cle];
+          return copie;
+        });
+        setAvis({ ton: "erreur", texte: j.error || `suivi impossible (${rep.status})` });
+        return;
+      }
+      setSuivi((s) => ({ ...s, [cle]: j.statut === "en_attente" ? "attente" : "suivie" }));
+      setAvis({ ton: "ok", texte: j.message || "entreprise suivie" });
+    } catch (e) {
+      setSuivi((s) => {
+        const copie = { ...s };
+        delete copie[cle];
+        return copie;
+      });
+      setAvis({ ton: "erreur", texte: e instanceof Error ? e.message : "appel impossible" });
+    }
+  }, []);
+
   // SOUS-TABLEAU de l'onglet « À trier », plus une section de page : d'où le h3
   // et l'absence de conteneur centré (le parent s'en charge). Avoir deux files
   // de triage a l'ecran, l'une sous l'autre, donnait l'impression de deux
@@ -118,10 +168,14 @@ export function OffresDecouvertes() {
           </h3>
           <p className="mt-1 text-sm text-muted">
             Cherchées avec les mots-clés de <code>portals.yml</code> puis triées. Trois issues&nbsp;:{" "}
-            <strong>Générer</strong> rédige lettre et CV, puis dépose la candidature dans «&nbsp;À
-            valider&nbsp;»&nbsp;; <strong>J’ai postulé à la main</strong> crée la ligne de suivi pour une
-            candidature envoyée ailleurs&nbsp;; <strong>Écarter</strong> la retire pour de bon — elle ne
-            reviendra pas, même si une prochaine tournée la retrouve.
+            <strong>Générer</strong>
+            {" rédige lettre et CV, puis dépose la candidature dans « À valider » ; "}
+            <strong>J’ai postulé à la main</strong>
+            {" crée la ligne de suivi pour une candidature envoyée ailleurs ; "}
+            <strong>Écarter</strong>
+            {" la retire pour de bon — elle ne reviendra pas, même si une prochaine tournée la retrouve. "}
+            <strong>Suivre l’entreprise</strong>
+            {" ajoute l’employeur au réseau des ATS surveillés : sa page carrières sera relue à chaque tournée, même quand cette annonce aura expiré."}
           </p>
         </div>
         <button
@@ -177,9 +231,12 @@ export function OffresDecouvertes() {
               </div>
               {o.whyMatch && <p className="mt-2 text-sm text-muted">{o.whyMatch}</p>}
 
-              {/* Trois affordances, pas une de plus : lire l'annonce, lancer la
-                  rédaction, ou écarter. Toute autre décision se prend ailleurs —
-                  la fiche rédigée part dans « À valider ». */}
+              {/* Trois décisions sur l'OFFRE, pas une de plus : lancer la
+                  rédaction, la déclarer déjà envoyée, ou écarter — les trois
+                  retirent la carte. Toute autre décision se prend ailleurs : la
+                  fiche rédigée part dans « À valider ». Le quatrième bouton ne
+                  décide rien sur l'offre, il vise l'ENTREPRISE (suivi de sa page
+                  carrières) : il est à part et laisse la carte en place. */}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => decider(o.jobId, "generer")}
@@ -210,6 +267,7 @@ export function OffresDecouvertes() {
                   <X className="size-3.5" />
                   Écarter
                 </button>
+                {o.company && <BoutonSuivre offre={o} etat={suivi[cleEntreprise(o.company)]} onSuivre={() => suivre(o)} />}
                 {o.url && (
                   <a
                     href={o.url}
@@ -226,5 +284,57 @@ export function OffresDecouvertes() {
         </ul>
       )}
     </section>
+  );
+}
+
+/**
+ * « Suivre l'entreprise » — ajoute l'employeur au réseau public des ATS
+ * (portals.yml), séparé des trois décisions par un filet vertical parce qu'il ne
+ * joue PAS dans la même file : les autres retirent la carte, celui-ci non.
+ *
+ * Une fois posé, l'état ne se ré-clique pas : il renvoie vers la page Portails,
+ * seul endroit où compléter une entreprise restée sans ATS.
+ */
+function BoutonSuivre({
+  offre,
+  etat,
+  onSuivre,
+}: {
+  offre: Offre;
+  etat?: "encours" | "suivie" | "attente";
+  onSuivre: () => void;
+}) {
+  const filet = <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />;
+
+  if (etat === "suivie" || etat === "attente") {
+    return (
+      <>
+        {filet}
+        <Link
+          href="/portals"
+          className={`inline-flex items-center gap-1.5 text-xs ${
+            etat === "suivie" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+          } hover:underline`}
+        >
+          <Radar className="size-3.5" />
+          {etat === "suivie" ? "Entreprise suivie" : "En attente d’ATS"}
+        </Link>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {filet}
+      <button
+        onClick={onSuivre}
+        disabled={etat === "encours"}
+        title={`Ajouter ${offre.company} au réseau public des ATS : sa page carrières sera relue à chaque tournée, même quand cette annonce aura expiré.`}
+        className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand disabled:opacity-50"
+      >
+        {etat === "encours" ? <Loader2 className="size-3.5 animate-spin" /> : <Radar className="size-3.5" />}
+        {etat === "encours" ? "Recherche de l’ATS…" : "Suivre l’entreprise"}
+      </button>
+    </>
   );
 }
