@@ -3,7 +3,7 @@ import path from "node:path";
 import { careerOpsRoot, readInbox } from "@/lib/career-ops";
 import { erreurOpenAi, executeLlm } from "@/lib/llm-runner";
 import { parseFit, promptFit } from "@/lib/pipeline-fit.mjs";
-import { planAnnonce, texteDepuisHtml } from "@/lib/annonce-source.mjs";
+import { litAnnonce } from "@/lib/annonce-fetch.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,87 +33,6 @@ export const maxDuration = 300;
  * qui part au modèle vient du serveur, pas du navigateur — même discipline que
  * `/api/offers/decision`.
  */
-
-const TAILLE_MAX = 800_000;
-const DELAI_MS = 25_000;
-
-/** Même garde-fou que /api/contact-lookup : l'URL vient d'une annonce
- *  extérieure, donc http(s) seulement et jamais vers une adresse interne. */
-function urlSure(brut: string): URL | null {
-  let u: URL;
-  try {
-    u = new URL(brut);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-  const h = u.hostname.toLowerCase();
-  if (
-    h === "localhost" ||
-    h.endsWith(".localhost") ||
-    h.endsWith(".internal") ||
-    h.endsWith(".local") ||
-    /^\d+\.\d+\.\d+\.\d+$/.test(h) ||
-    h.startsWith("[")
-  ) {
-    return null;
-  }
-  return u;
-}
-
-async function recupere(u: URL, accept: string): Promise<Response | null> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), DELAI_MS);
-  try {
-    const r = await fetch(u, {
-      signal: ctrl.signal,
-      redirect: "follow",
-      headers: { "user-agent": "Mozilla/5.0 (career-ops pipeline-fit)", accept },
-    });
-    return r.ok ? r : null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-/**
- * Le texte de l'annonce, par le meilleur chemin disponible.
- *
- * D'ABORD l'API publique du tableau ATS quand il est reconnu. Un
- * `jobs.ashbyhq.com` est une application React : récupérer sa page rend une
- * coquille vide, et l'évaluation échouait en « annonce illisible » — constaté en
- * production le 2026-08-07. La même offre est parfaitement lisible par
- * `api.ashbyhq.com`, que `providers/ashby.mjs` interroge déjà pour la découvrir.
- *
- * ENSUITE la page, pour tout le reste (forum, pages statiques). Le repli sert
- * aussi quand l'API d'un ATS reconnu ne rend rien : un tableau peut avoir retiré
- * l'offre alors que la page existe encore.
- */
-async function litAnnonce(brut: string): Promise<{ texte: string; via: string }> {
-  const u = urlSure(brut);
-  if (!u) return { texte: "", via: "url refusée" };
-
-  const plan = planAnnonce(brut);
-  if (plan) {
-    const uApi = urlSure(plan.requete);
-    const r = uApi ? await recupere(uApi, "application/json") : null;
-    if (r) {
-      try {
-        const texte = texteDepuisHtml(plan.extrait(await r.json()));
-        if (texte.length >= 200) return { texte, via: `api ${plan.ats}` };
-      } catch {
-        /* payload illisible : on retombe sur la page */
-      }
-    }
-  }
-
-  const r = await recupere(u, "text/html,*/*");
-  if (!r) return { texte: "", via: plan ? `api ${plan.ats} muette, page injoignable` : "page injoignable" };
-  const texte = texteDepuisHtml((await r.text()).slice(0, TAILLE_MAX));
-  return { texte, via: plan ? `api ${plan.ats} muette, repli page` : "page" };
-}
 
 function profilCv(): string {
   for (const rel of ["cv.md", path.join("data", "perso", "cv.md")]) {

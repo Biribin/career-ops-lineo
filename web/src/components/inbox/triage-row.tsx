@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, Check, Copy, ExternalLink, Loader2, MessageSquarePlus, ScanSearch, X } from "lucide-react";
+import { Bookmark, BookmarkCheck, Check, Copy, ExternalLink, Loader2, MessageSquarePlus, ScanSearch, Sparkles, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
@@ -81,6 +81,38 @@ export function TriageRow({
   };
   const [fit, setFit] = useState<Fit | null>(null);
   const [fitEnCours, setFitEnCours] = useState(false);
+
+  // ── Générer la candidature (lettre + CV) via le workflow n8n 2 ─────────────
+  //
+  // Le pendant du bouton « Générer la candidature » des offres France Travail,
+  // pour cette file-ci. Il ne passe PAS par l'évaluation complète ni par un
+  // rapport : /api/candidature/generer lit l'annonce et passe la main au
+  // workflow, qui dépose la fiche dans « À valider ». Rien n'est envoyé à un
+  // recruteur — c'est Linéo qui valide là-bas.
+  const [candidature, setCandidature] = useState<{ ok: boolean; message: string } | null>(null);
+  const [candidatureEnCours, setCandidatureEnCours] = useState(false);
+
+  async function genererCandidature() {
+    setCandidatureEnCours(true);
+    setCandidature(null);
+    try {
+      const res = await fetch("/api/candidature/generer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: job.url }),
+      });
+      const data = (await res.json()) as { ok?: boolean; message?: string; error?: string };
+      setCandidature(
+        data.ok
+          ? { ok: true, message: data.message || "génération lancée" }
+          : { ok: false, message: data.error || `échec (${res.status})` },
+      );
+    } catch (e) {
+      setCandidature({ ok: false, message: e instanceof Error ? e.message : "génération injoignable" });
+    } finally {
+      setCandidatureEnCours(false);
+    }
+  }
 
   async function evaluerOffre() {
     setFitEnCours(true);
@@ -227,6 +259,23 @@ export function TriageRow({
             </button>
           )}
 
+          {/* Générer la candidature — passe la main au workflow n8n 2 (lettre +
+              CV), qui dépose la fiche dans « À valider ». Reste disponible même
+              après une évaluation : ce sont deux gestes indépendants. Masqué sur
+              les posts du forum, qui n'ont pas d'annonce à lire. */}
+          {!isN8n && job.url && (
+            <button
+              type="button"
+              onClick={genererCandidature}
+              disabled={candidatureEnCours}
+              title="Générer lettre + CV adaptés pour cette offre — la fiche arrive dans « À valider », rien n'est envoyé"
+              className="inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-hover hover:text-brand disabled:opacity-60 max-sm:min-h-[44px]"
+            >
+              {candidatureEnCours ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              <span className="max-sm:hidden">{candidatureEnCours ? "…" : "Candidature"}</span>
+            </button>
+          )}
+
           {/* EVALUADA state OU actions save/skip */}
           {evaluated ? (
             <Link href={`/jobs/${scored!.jobId}`} className="flex items-center gap-1.5 text-xs">
@@ -329,6 +378,39 @@ export function TriageRow({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Suite de « Candidature » : lancée, ou refusée avec la raison. Le
+          message d'échec est celui du serveur (workflow désactivé, annonce
+          illisible…) — un « ça n'a pas marché » sans cause fait chercher au
+          mauvais endroit. */}
+      {candidature && (
+        <div className="ml-7 flex items-start gap-2 rounded-lg border border-border bg-surface/40 p-3 sm:ml-9">
+          {candidature.ok ? (
+            <Check className="mt-px size-3.5 shrink-0 text-emerald-500" />
+          ) : (
+            <X className="mt-px size-3.5 shrink-0 text-red-400" />
+          )}
+          <p className="flex-1 text-xs text-foreground">
+            {candidature.message}
+            {candidature.ok && (
+              <>
+                {" "}
+                <Link href="/a-valider" className="font-medium text-brand hover:underline">
+                  Ouvrir « À valider »
+                </Link>
+              </>
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={() => setCandidature(null)}
+            title="Fermer"
+            className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
         </div>
       )}
 
