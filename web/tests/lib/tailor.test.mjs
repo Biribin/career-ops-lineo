@@ -27,7 +27,7 @@ const CV = `# CV
 
 ## Professional Summary
 
-J'ai automatisé la paie et la DSN d'un groupe de 900 salariés.
+J'ai automatisé la paie et la DSN d'un groupe qui gère 900 intérimaires.
 
 ## Skills
 
@@ -52,8 +52,8 @@ test("vocabulaireCv: ne lit que la section Skills", () => {
   const v = vocabulaireCv(CV);
   assert.ok(v.includes("n8n"));
   assert.ok(v.includes("DSN"));
-  // « 900 salariés » est dans le résumé, pas dans Skills : hors périmètre.
-  assert.ok(!v.some((p) => /salari/i.test(p)));
+  // « 900 intérimaires » est dans le résumé, pas dans Skills : hors périmètre.
+  assert.ok(!v.some((p) => /intérim/i.test(p)));
   // Le titre de rubrique n'est pas une compétence.
   assert.ok(!v.includes("Automatisation & intégration"));
   // Un CV sans section Skills ne produit aucun vocabulaire (donc aucun mot-clé).

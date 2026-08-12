@@ -109,12 +109,12 @@ test("les periodes sont lues, guillemets retires", () => {
 test("une duree chiffree en annees est detectee, un nombre ordinaire non", () => {
   assert.ok(dureeInventee("deux ans d'experience"));
   assert.ok(dureeInventee("3 ans sur le sujet"));
-  assert.ok(!dureeInventee("900 salaries et 12 716 vacations"));
+  assert.ok(!dureeInventee("900 interimaires et 12 716 vacations"));
 });
 
 test("les durees sont listees et normalisees, pas seulement detectees", () => {
   assert.deepEqual(dureesAnnees("Deux ans ici, puis  un   an la"), ["deux ans", "un an"]);
-  assert.deepEqual(dureesAnnees("900 salaries"), []);
+  assert.deepEqual(dureesAnnees("900 interimaires"), []);
 });
 
 test("une duree DEJA dans le CV de base n'est pas une invention", () => {
