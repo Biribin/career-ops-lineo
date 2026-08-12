@@ -72,6 +72,25 @@ test("une suggestion Lever EU s'écrit sur le bon datacenter", () => {
   assert.ok(text.includes('jobs.eu.lever.co/acme'), text);
 });
 
+test("une suggestion WelcomeKit s'écrit sur le board de l'entreprise", () => {
+  // Ajouté avec le provider welcomekit (2026-08-12). Sans cette branche, la
+  // garde ci-dessous aurait refusé la suggestion : la découverte aurait trouvé
+  // le board et le writer l'aurait laissé de côté.
+  const { text, fixes, skipped } = computeFixes(
+    PORTALS,
+    resultatMissing({ ats: 'welcomekit', slug: 'nutripure', jobCount: 39 }),
+    { dateStr: '2026-08-12' },
+  );
+  assert.equal(skipped.length, 0);
+  assert.equal(fixes[0].careersUrlNew, 'https://nutripure.welcomekit.co/');
+  assert.ok(!text.includes('jobs.lever.co'), text);
+  assert.ok(!text.includes('boards-api.greenhouse.io'), text);
+  assert.deepEqual(resolvedUrls({ ats: 'welcomekit', slug: 'nutripure' }), {
+    careersUrl: 'https://nutripure.welcomekit.co/',
+    api: null,
+  });
+});
+
 test('un ATS inconnu du writer est signalé, pas deviné', () => {
   // La garde anti-régression : le prochain ATS ajouté à verify-portals sans
   // branche ici doit laisser l'entrée intacte et se faire annoncer, au lieu

@@ -7,8 +7,9 @@
  * `careers_url`, e.g. `jobs.lever.co/<slug>`) is easy to guess wrong — and a
  * wrong slug 404s silently on every future scan, so the company never appears
  * in results and the mistake is invisible. This script probes the public
- * Greenhouse / Ashby / Lever / SmartRecruiters endpoints for a company's slug
- * (or for candidate slugs derived from its name) and reports which resolve.
+ * Greenhouse / Ashby / Lever / SmartRecruiters / WelcomeKit endpoints for a
+ * company's slug (or for candidate slugs derived from its name) and reports
+ * which resolve.
  *
  * A 200 that returns an empty job list is reported as 'live but empty' — a
  * legitimate state during between-hires periods — kept distinct from an
@@ -25,7 +26,10 @@
  *
  * Network: only the sweep / --add paths hit the network. Importing the module
  * (for tests) runs nothing — main() is guarded — and all network access goes
- * through an injectable `fetchJson`, so the pure logic is testable offline.
+ * through an injectable `fetchJson` (plus `fetchText` for an HTML-served board),
+ * so the pure logic is testable offline. `fetchText` has NO default outside
+ * main(): a text probe without an injected transport refuses to run rather than
+ * reach the network behind a test's back.
  */
 
 import { existsSync, readFileSync } from 'fs';
@@ -33,8 +37,9 @@ import { dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import yaml from 'js-yaml';
 
-import { fetchJson as defaultFetchJson, makeHttpCtx } from './providers/_http.mjs';
+import { fetchJson as defaultFetchJson, fetchText as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
+import { parseWelcomekitBoard } from './providers/welcomekit.mjs';
 
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
 
@@ -94,6 +99,31 @@ export const ATS = {
       Array.isArray(json?.content)
         ? (Number.isFinite(json?.totalFound) ? json.totalFound : json.content.length)
         : null,
+    emptyProvesTenant: false,
+  },
+  // WelcomeKit : l'ATS historique de Welcome to the Jungle, sur
+  // `<slug>.welcomekit.co`. Ajouté parce que c'était le trou par lequel des
+  // employeurs FRANÇAIS entiers échappaient à la découverte : les quatre ATS
+  // ci-dessus sont la pile des startups américaines, donc « aucun slug ne
+  // résout » était la réponse mécanique pour un board français vivant (constaté
+  // le 2026-08-11 sur un employeur suivi, 40 postes ouverts, invisible).
+  //
+  // `transport: 'text'` : ce board n'a PAS d'API JSON (vérifié le 2026-08-12 :
+  // /jobs.json et /api/v1/jobs répondent 404, et `?format=json` annonce
+  // `application/json` en servant du HTML). On compte donc les offres avec le
+  // parseur du provider lui-même, pas avec un compteur maison : le sondage
+  // mesure ainsi exactement ce que le scanner saura lire en production, et les
+  // deux ne peuvent pas dériver.
+  //
+  // `emptyProvesTenant: false` pour la MÊME raison que SmartRecruiters, vérifiée
+  // sur le vif le 2026-08-12 : un slug inventé répond **200** avec un corps de
+  // 63 octets et zéro offre. Sans ce drapeau, `--add` suggérerait un board
+  // WelcomeKit pour n'importe quel nom d'entreprise au monde.
+  welcomekit: {
+    probeUrl: (slug) => `https://${slug}.welcomekit.co/`,
+    transport: 'text',
+    jobCount: (html) =>
+      typeof html === 'string' ? parseWelcomekitBoard(html, 'https://board.welcomekit.co/').length : null,
     emptyProvesTenant: false,
   },
 };
@@ -226,10 +256,12 @@ export function classifyFetchError(err) {
 /**
  * Probe one ATS for one slug and classify the result.
  *
- * @param {string} ats - Key into ATS (greenhouse | ashby | lever | smartrecruiters).
+ * @param {string} ats - Key into ATS (greenhouse | ashby | lever | smartrecruiters | welcomekit).
  * @param {string} slug - Candidate slug to probe.
- * @param {{fetchJson?: Function, eu?: boolean}} [deps] - Injectable HTTP for
- *   testability; `eu` selects Lever's EU data-residency instance.
+ * @param {{fetchJson?: Function, fetchText?: Function, eu?: boolean}} [deps] -
+ *   Injectable HTTP for testability; `eu` selects Lever's EU data-residency
+ *   instance. `fetchText` is required only by an ATS whose spec declares
+ *   `transport: 'text'`, and is DELIBERATELY not defaulted — see below.
  * @returns {Promise<{ats,slug,url,status,jobCount?,httpStatus?,errorKind?,reason?}>}
  *   status is 'live' (jobs > 0), 'empty' (200, no jobs), or 'missing'
  *   (404/error/unexpected shape).
@@ -237,7 +269,7 @@ export function classifyFetchError(err) {
 export async function probeSlug(
   ats,
   slug,
-  { fetchJson = defaultFetchJson, eu = false } = {},
+  { fetchJson = defaultFetchJson, fetchText = null, eu = false } = {},
 ) {
   const spec = ATS[ats];
   if (!spec)
@@ -250,9 +282,24 @@ export async function probeSlug(
       reason: `unknown ATS: ${ats}`,
     };
   const url = spec.probeUrl(slug, { eu });
+  // Un ATS servi en HTML exige un transport texte EXPLICITE. Ne pas le défauter
+  // sur le vrai réseau est ce qui garde les suites hors-ligne : les tests qui
+  // n'injectent que `fetchJson` (dont tests/verify-portals-ats.test.mjs, dont
+  // l'en-tête interdit tout accès réseau) verraient sinon chaque découverte
+  // partir vers welcomekit.co pour de vrai.
+  if (spec.transport === 'text' && typeof fetchText !== 'function') {
+    return {
+      ats,
+      slug,
+      url,
+      status: 'missing',
+      errorKind: 'unknown',
+      reason: 'no text transport supplied for a text-served ATS',
+    };
+  }
   try {
-    const json = await fetchJson(url);
-    const count = spec.jobCount(json);
+    const brut = spec.transport === 'text' ? await fetchText(url) : await fetchJson(url);
+    const count = spec.jobCount(brut);
     if (count == null)
       return {
         ats,
@@ -324,10 +371,10 @@ function* slugProbePlan(name) {
 }
 
 /** Probe slug variants across all ATSes; prefer live boards over empty ones. */
-async function discoverAlternates(name, { fetchJson }) {
+async function discoverAlternates(name, { fetchJson, fetchText = null }) {
   let bestEmpty = null;
   for (const { ats, slug, eu } of slugProbePlan(name)) {
-    const r = await probeSlug(ats, slug, { fetchJson, eu });
+    const r = await probeSlug(ats, slug, { fetchJson, fetchText, eu });
     // `eu` is carried on the result because ats is 'lever' for both instances —
     // without it a suggestion can't say which datacenter to write down.
     if (r.status === 'live') return { ...r, eu };
@@ -446,7 +493,7 @@ export async function probeProvider(entry, provider, baseCtx) {
  */
 export async function verifyCompanies(
   companies,
-  { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {},
+  { fetchJson = defaultFetchJson, fetchText = null, providers = null, httpCtx = null } = {},
 ) {
   const list = Array.isArray(companies) ? companies : [];
   const results = [];
@@ -457,14 +504,14 @@ export async function verifyCompanies(
     const match =
       parseAtsSlug(company.api) || parseAtsSlug(company.careers_url);
     if (match) {
-      const probe = await probeSlug(match.ats, match.slug, { fetchJson, eu: match.eu });
+      const probe = await probeSlug(match.ats, match.slug, { fetchJson, fetchText, eu: match.eu });
       if (probe.status === 'live' || probe.status === 'empty') {
         results.push({ name, ...probe });
         continue;
       }
       // Wrong slug or ATS migration — cross-probe only for slug/unknown failures.
       if (probe.errorKind === 'slug_gone' || probe.errorKind === 'unknown') {
-        const suggested = await discoverAlternates(name, { fetchJson });
+        const suggested = await discoverAlternates(name, { fetchJson, fetchText });
         if (suggested) {
           results.push({ name, ...probe, suggested });
           continue;
@@ -505,14 +552,14 @@ export async function verifyCompanies(
  */
 export async function verifyPortalsFile(
   filePath,
-  { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {},
+  { fetchJson = defaultFetchJson, fetchText = null, providers = null, httpCtx = null } = {},
 ) {
   if (!existsSync(filePath)) return { found: false, results: [] };
   const config = yaml.load(readFileSync(filePath, 'utf-8'));
   const companies = Array.isArray(config?.tracked_companies)
     ? config.tracked_companies
     : [];
-  const results = await verifyCompanies(companies, { fetchJson, providers, httpCtx });
+  const results = await verifyCompanies(companies, { fetchJson, fetchText, providers, httpCtx });
   return { found: true, results };
 }
 
@@ -564,7 +611,7 @@ function printResults(results) {
  * @returns {Promise<{hits: Array<object>, inconclusive: number, best: object|null}>}
  *   `best` is the slug a human should write down, or null when nothing resolved.
  */
-export async function runAdd(name, { fetchJson = defaultFetchJson, log = console.log } = {}) {
+export async function runAdd(name, { fetchJson = defaultFetchJson, fetchText = null, log = console.log } = {}) {
   const candidates = deriveSlugCandidates(name);
   if (candidates.length === 0) {
     console.error('verify-portals: --add needs a company name');
@@ -576,7 +623,7 @@ export async function runAdd(name, { fetchJson = defaultFetchJson, log = console
   const hits = [];
   let inconclusive = 0;
   for (const { ats, slug, eu } of slugProbePlan(name)) {
-    const r = await probeSlug(ats, slug, { fetchJson, eu });
+    const r = await probeSlug(ats, slug, { fetchJson, fetchText, eu });
     if (r.status === 'missing') continue;
     if (!probeProvesTenant(r)) {
       inconclusive += 1;
@@ -615,10 +662,13 @@ async function main() {
   const args = process.argv.slice(2);
   const strict = args.includes('--strict');
   const fetchJson = defaultFetchJson;
+  // Le vrai transport texte n'est branché QUE sur les chemins CLI : voir la garde
+  // de probeSlug pour pourquoi il n'a pas de valeur par défaut ailleurs.
+  const fetchText = defaultFetchText;
 
   const addFlag = args.indexOf('--add');
   if (addFlag !== -1) {
-    await runAdd(args[addFlag + 1] || '', { fetchJson });
+    await runAdd(args[addFlag + 1] || '', { fetchJson, fetchText });
     return;
   }
 
@@ -632,7 +682,7 @@ async function main() {
   // of an un-actionable "skipped".
   const providers = await loadProviders(PROVIDERS_DIR);
   const httpCtx = makeHttpCtx();
-  const { found, results } = await verifyPortalsFile(filePath, { fetchJson, providers, httpCtx });
+  const { found, results } = await verifyPortalsFile(filePath, { fetchJson, fetchText, providers, httpCtx });
   if (!found) {
     // Graceful no-op: fresh setups (and CI, which ships no portals.yml) have
     // nothing to verify. Not an error.

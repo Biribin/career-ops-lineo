@@ -34,6 +34,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 
+import { fetchText } from './providers/_http.mjs';
 import { verifyPortalsFile } from './verify-portals.mjs';
 
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
@@ -96,6 +97,12 @@ export function resolvedUrls({ ats, slug, eu }) {
       careersUrl: `https://jobs.${eu ? 'eu.' : ''}lever.co/${slug}`,
       api: null,
     };
+  }
+  if (ats === 'welcomekit') {
+    // Le board EST la page carrières : `<slug>.welcomekit.co`. Comme
+    // SmartRecruiters, cette forme est volontairement hors du tier 1 de
+    // verify-portals et route l'entrée vers providers/welcomekit.mjs.
+    return { careersUrl: `https://${slug}.welcomekit.co/`, api: null };
   }
   if (ats === 'smartrecruiters') {
     // careers.smartrecruiters.com is DELIBERATELY absent from verify-portals'
@@ -375,7 +382,10 @@ async function main() {
     return;
   }
 
-  const { results } = await verifyPortalsFile(filePath);
+  // `fetchText` doit être passé explicitement : sans lui, un board servi en HTML
+  // (WelcomeKit) ne serait jamais sondé, donc jamais suggéré, donc jamais réparé
+  // ici. Voir la garde de transport dans probeSlug.
+  const { results } = await verifyPortalsFile(filePath, { fetchText });
   const rawText = readFileSync(filePath, 'utf-8');
   const { text, fixes, skipped } = computeFixes(rawText, results);
 

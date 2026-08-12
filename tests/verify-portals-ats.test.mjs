@@ -28,6 +28,9 @@ import {
   verifyCompanies,
 } from '../verify-portals.mjs';
 
+/** Un board WelcomeKit minimal mais fidèle (une offre). */
+const BOARD_WK = `<li class='jobs-list-item'><a class="jobs-list-item-link" href="/jobs/x_toulouse"><h3 class='jobs-list-item-title'>Un poste</h3></a></li>`;
+
 /** An HTTP 404, shaped the way providers/_http.mjs throws it. */
 function http404() {
   const err = new Error('HTTP 404 Not Found');
@@ -187,4 +190,60 @@ test('--add sonde aussi l\'instance Lever EU', async () => {
   assert.equal(best?.ats, 'lever');
   assert.equal(best?.eu, true);
   assert.equal(best?.jobCount, 2);
+});
+
+// ── WelcomeKit : un ATS servi en HTML, ajouté le 2026-08-12 ─────────────────
+//
+// C'était le trou par lequel des employeurs français entiers échappaient à la
+// découverte : les quatre autres ATS sont la pile des startups américaines.
+
+test('probeSlug WelcomeKit : un board peuplé est live, et compté', async () => {
+  const r = await probeSlug('welcomekit', 'nutripure', {
+    fetchJson: fauxFetch({}),
+    fetchText: async (url) => {
+      assert.equal(url, 'https://nutripure.welcomekit.co/');
+      return BOARD_WK;
+    },
+  });
+  assert.equal(r.status, 'live');
+  assert.equal(r.jobCount, 1);
+});
+
+test("un slug WelcomeKit inconnu répond 200 + vide : ça ne prouve RIEN", async () => {
+  // Constaté sur le vif le 2026-08-12 : `zzzzzz-ceci-nexiste-pas-42.welcomekit.co`
+  // répond 200 avec 63 octets et zéro offre — exactement le piège
+  // SmartRecruiters. D'où le drapeau, et donc le refus de suggérer.
+  const r = await probeSlug('welcomekit', 'ceci-nexiste-pas-42', {
+    fetchJson: fauxFetch({}),
+    fetchText: async () => '<html><body></body></html>',
+  });
+  assert.equal(r.status, 'empty');
+  assert.equal(ATS.welcomekit.emptyProvesTenant, false);
+  assert.equal(probeProvesTenant(r), false);
+});
+
+test('un sondage texte SANS transport injecté ne va pas sur le réseau', async () => {
+  // LA garde qui garde cette suite hors-ligne : sans elle, chaque test qui
+  // n'injecte que `fetchJson` partirait pour de vrai vers welcomekit.co, et la
+  // suite tomberait dès que le réseau ou le board bouge.
+  const r = await probeSlug('welcomekit', 'nutripure', { fetchJson: fauxFetch({}) });
+  assert.equal(r.status, 'missing');
+  assert.match(String(r.reason), /text transport/);
+});
+
+test('--add trouve un board WelcomeKit quand aucun ATS JSON ne résout', async () => {
+  const { best } = await runAdd('Nutripure', {
+    fetchJson: fauxFetch({}), // tout 404 côté JSON
+    fetchText: async (url) => (url === 'https://nutripure.welcomekit.co/' ? BOARD_WK : ''),
+    log: () => {},
+  });
+  assert.equal(best?.ats, 'welcomekit');
+  assert.equal(best?.slug, 'nutripure');
+  assert.equal(best?.jobCount, 1);
+});
+
+test("un careers_url welcomekit.co ne matche PAS le tier 1", () => {
+  // Même raison que SmartRecruiters : l'entrée doit tomber dans la couche
+  // provider (providers/welcomekit.mjs), qui est le code que le scanner exécute.
+  assert.equal(parseAtsSlug('https://nutripure.welcomekit.co/'), null);
 });

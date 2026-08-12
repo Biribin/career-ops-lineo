@@ -16,7 +16,48 @@
 // so a decimal entity can never absorb trailing hex letters — "&#1a2;" no
 // longer silently parses as codepoint 1 and drops "a2"; it just fails to
 // match and passes through untouched, same as any other malformed entity.
+// Les cinq entités XML + nbsp, PLUS les lettres accentuées Latin-1. Ces
+// dernières ont été ajoutées le 2026-08-12 en écrivant le provider welcomekit :
+// un décodeur qui laisse passer `&eacute;` rend « Charg&eacute;.e » comme titre
+// d'offre, et le filtre de mots-clés du scanner ne reconnaît alors plus le
+// poste. Le trou concernait tous les boards français, italiens, espagnols et
+// allemands scrapés en HTML, pas seulement celui-là.
+//
+// Volontairement limité à Latin-1 : une table HTML5 complète (2 231 entrées)
+// n'a pas sa place ici, et ce sont les accents qui apparaissent dans des
+// intitulés de poste.
 const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+// Lettres accentuées, en minuscules. La variante capitale (`&Eacute;`) est
+// dérivée juste en dessous plutôt qu'écrite à la main : deux tables se
+// désynchronisent.
+const LETTRES_ACCENTUEES = {
+  agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å', aelig: 'æ',
+  ccedil: 'ç',
+  egrave: 'è', eacute: 'é', ecirc: 'ê', euml: 'ë',
+  igrave: 'ì', iacute: 'í', icirc: 'î', iuml: 'ï',
+  ntilde: 'ñ',
+  ograve: 'ò', oacute: 'ó', ocirc: 'ô', otilde: 'õ', ouml: 'ö', oslash: 'ø', oelig: 'œ',
+  ugrave: 'ù', uacute: 'ú', ucirc: 'û', uuml: 'ü',
+  yacute: 'ý', yuml: 'ÿ',
+};
+
+// Signes et ponctuation sans casse.
+const SIGNES = {
+  szlig: 'ß', deg: '°', euro: '€', pound: '£', laquo: '«', raquo: '»',
+  hellip: '…', ndash: '–', mdash: '—', rsquo: '’', lsquo: '‘', ldquo: '“', rdquo: '”',
+};
+
+for (const [nom, valeur] of Object.entries(LETTRES_ACCENTUEES)) {
+  NAMED_ENTITIES[nom] = valeur;
+  const majuscule = valeur.toUpperCase();
+  // `ß`.toUpperCase() vaut « SS » : on n'ajoute une capitale que si elle reste
+  // une seule lettre, sinon `&SZLIG;` rendrait deux caractères.
+  if (majuscule.length === 1 && majuscule !== valeur) {
+    NAMED_ENTITIES[nom[0].toUpperCase() + nom.slice(1)] = majuscule;
+  }
+}
+Object.assign(NAMED_ENTITIES, SIGNES);
 
 /** @param {string} s */
 export function decodeEntities(s) {
@@ -31,6 +72,9 @@ export function decodeEntities(s) {
       const valid = Number.isFinite(code) && code >= 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
       return valid ? String.fromCodePoint(code) : m;
     }
-    return NAMED_ENTITIES[body.toLowerCase()] ?? m;
+    // La casse EXACTE d'abord : `&Eacute;` doit rendre « É », pas « é ». Le repli
+    // insensible à la casse ne sert qu'aux entités sans capitale distincte
+    // (`&AMP;`, `&NBSP;`), dont c'était le comportement historique.
+    return NAMED_ENTITIES[body] ?? NAMED_ENTITIES[body.toLowerCase()] ?? m;
   });
 }
