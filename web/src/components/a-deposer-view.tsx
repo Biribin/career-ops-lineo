@@ -50,6 +50,9 @@ type Reponse = {
   origine?: string;
   erreur?: string | null;
   tronquees?: number;
+  /** Panne de lecture du journal des décisions — pas « aucune décision prise ». */
+  erreurJournal?: string | null;
+  journalIllisibles?: number;
 };
 
 /**
@@ -130,6 +133,26 @@ export function ADeposerView() {
         </p>
       )}
 
+      {res?.erreurJournal && (
+        <p className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm">
+          <span className="font-medium text-red-700 dark:text-red-400">
+            Journal des décisions illisible
+          </span>{" "}
+          <span className="text-muted">
+            — cette file se construit à partir de lui, donc elle est <strong className="text-foreground">vide par
+            panne, pas par vérité</strong>. Ne conclus rien de ce qui s&apos;affiche ci-dessous.
+          </span>
+          <code className="mt-1 block whitespace-pre-wrap break-all text-xs text-faint">{res.erreurJournal}</code>
+        </p>
+      )}
+
+      {res && (res.journalIllisibles ?? 0) > 0 && (
+        <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-muted">
+          {res.journalIllisibles} ligne(s) du journal des décisions n&apos;ont pas pu être relues. Une candidature
+          validée peut donc manquer ici.
+        </p>
+      )}
+
       {res && (res.tronquees ?? 0) > 0 && (
         <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-muted">
           {res.tronquees} fiche(s) au-delà du plafond de lecture ne sont pas affichées ici.
@@ -142,7 +165,9 @@ export function ADeposerView() {
         </p>
       )}
 
-      {!chargement && !res?.erreur && fiches.length === 0 && (
+      {/* « Rien à déposer » ne s'affiche que si les deux lectures ont réussi :
+          sinon on affirmerait une file vide qu'on n'a pas pu constater. */}
+      {!chargement && !res?.erreur && !res?.erreurJournal && fiches.length === 0 && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
           Rien à déposer. Chaque candidature validée a été soit postée par n8n, soit enregistrée ici.
         </p>
