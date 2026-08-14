@@ -7,6 +7,7 @@ import { paramsToFilters } from "@/lib/explore";
 import { classerOffres } from "@/lib/scan-rank.mjs";
 import { titresCibles } from "@/lib/tailor.mjs";
 import { lireFiltresPortals } from "@/lib/core/portals";
+import { compteur, derniereLigneRun } from "@/lib/scan-runs.mjs";
 
 export const runtime = "nodejs";
 // Un balayage d'annuaires ATS est borné par le réseau, pas par le CPU. Même
@@ -23,9 +24,17 @@ export const dynamic = "force-dynamic";
 // POST /api/tailor le sont) : la forme peut encore bouger, et la session n8n ne
 // doit pas s'y accrocher sans se resynchroniser.
 //
-// GRATUIT, zéro token. Le scanner (`scan-ats-full.mjs`) ne fait que du HTTP et du
-// JSON ; le classement est déterministe (@/lib/scan-rank.mjs). L'évaluation par
-// LLM — la vraie note de fit sur 5 — reste une étape séparée et explicite.
+// DEUX BALAYAGES, deux gisements. `scan-ats-full.mjs` parcourt les ANNUAIRES
+// d'ATS (découverte inversée : des entreprises qu'on ne suit pas encore) ;
+// `scan.mjs --only boards` interroge les BOARDS déclarés dans portals.yml (APEC,
+// Choisir le Service Public, Emploi Territorial, HelloWork, SolidJobs…). Le
+// second manquait, et son absence était totale : un board activé n'était jamais
+// balayé par une tournée automatique, puisque rien d'autre que le CLI ne lit
+// `job_boards`. Coupable avec `boards=0`.
+//
+// GRATUIT, zéro token. Les deux scanners ne font que du HTTP et du JSON ; le
+// classement est déterministe (@/lib/scan-rank.mjs). L'évaluation par LLM — la
+// vraie note de fit sur 5 — reste une étape séparée et explicite.
 //
 // Un GET qui ÉCRIT, c'est voulu : c'est la forme qu'un cron n8n sait appeler sans
 // corps de requête. Ce qu'il écrit est borné et passe par l'écrivain sanctionné —
@@ -37,7 +46,7 @@ export const dynamic = "force-dynamic";
 // Paramètres : `since` (jours, 1-60, défaut 7), `limit` (entreprises par ATS,
 // 50-500, défaut 150), `ats` (sous-ensemble), `top` (offres rendues, défaut 10),
 // `dry=1` (aucune écriture), `rescan=0` (ne relance rien, classe pipeline.md tel
-// quel — instantané et sans réseau).
+// quel — instantané et sans réseau), `boards=0` (saute les boards de portals.yml).
 //
 // Le plafond `limit` n'est pas cosmétique : sans `--limit`, le scanner balaie TOUS
 // les annuaires (des heures). Le défaut de l'Explorer est repris tel quel pour que
@@ -64,6 +73,7 @@ type ChargeScanner = {
  *  casse doit se distinguer d'un scan qui n'a rien trouvé. */
 async function lancerScan(
   args: string[],
+  timeoutMs = 280_000,
 ): Promise<{ charge: ChargeScanner | null; error: string | null }> {
   const script = rootScript("scan-ats-full");
   if (!fs.existsSync(script)) {
@@ -75,7 +85,7 @@ async function lancerScan(
       [script, "--json", ...args],
       // Un balayage complet peut rendre beaucoup de JSON : le maxBuffer par
       // défaut (1 Mo) tronquerait la sortie et on ne verrait qu'un JSON invalide.
-      { cwd: careerOpsRoot(), timeout: 280_000, maxBuffer: 64 * 1024 * 1024 },
+      { cwd: careerOpsRoot(), timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 },
       (err, stdout, stderr) => {
         const brut = String(stdout || "").trim();
         const debut = brut.indexOf("{");
@@ -101,6 +111,70 @@ async function lancerScan(
   });
 }
 
+// ── Le balayage des BOARDS de portals.yml ────────────────────────────────────
+//
+// Il manquait, et l'angle mort était total : `job_boards` n'est lu que par
+// `scan.mjs`, alors que cette route lance `scan-ats-full.mjs`, qui parcourt les
+// ANNUAIRES d'ATS (découverte inversée) et ne lit ni `job_boards` ni
+// `tracked_companies`. Un board pouvait donc être configuré et activé depuis des
+// mois sans qu'une seule tournée automatique ne le touche — constaté le
+// 2026-08-14 sur `SolidJobs IT` (activé de longue date) et sur les quatre
+// sources françaises tout juste ajoutées.
+//
+// D'où `--only boards` : la route ne peut pas lancer un `scan.mjs` complet, dont
+// les 116 entreprises suivies dépassent son plafond de 300 s.
+
+/** Les compteurs que `scan.mjs` persiste lui-même, une ligne par tournée non-dry. */
+type LigneRun = Record<string, string>;
+
+/** Le seul accès disque : la logique de lecture vit dans `scan-runs.mjs`, pure et
+ *  testée (colonnes lues par en-tête, ligne d'une AUTRE tournée refusée). */
+function dernierRun(depuis: number): LigneRun | null {
+  try {
+    const brut = fs.readFileSync(path.join(careerOpsRoot(), "data", "scan-runs.tsv"), "utf8");
+    return derniereLigneRun(brut, depuis) as LigneRun | null;
+  } catch {
+    // Fichier absent = aucune tournée jamais enregistrée. État normal.
+    return null;
+  }
+}
+
+/**
+ * Lance `scan.mjs --only boards`. Les nouvelles offres atterrissent dans
+ * `data/pipeline.md` par l'écrivain sanctionné du cœur (sous `pipeline-lock`),
+ * exactement comme au terminal — cette route n'écrit rien elle-même.
+ */
+async function lancerScanBoards(
+  { dry, timeoutMs }: { dry: boolean; timeoutMs: number },
+): Promise<{ run: LigneRun | null; error: string | null; lance: boolean }> {
+  const script = rootScript("scan");
+  if (!fs.existsSync(script)) {
+    return { run: null, error: "Le scanner scan.mjs est absent de cette installation.", lance: false };
+  }
+  const depuis = Date.now();
+  return new Promise((resolve) => {
+    execFile(
+      "node",
+      [script, "--only", "boards", "--quiet", ...(dry ? ["--dry-run"] : [])],
+      { cwd: careerOpsRoot(), timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 },
+      (err, _stdout, stderr) => {
+        // Un `--dry-run` ne persiste RIEN par construction : ne pas aller chercher
+        // une ligne de compteurs qui n'existera pas, et le dire.
+        const run = dry ? null : dernierRun(depuis);
+        if (!err) return resolve({ run, error: null, lance: true });
+        const fin = String(stderr || "").trim().split("\n").filter(Boolean).slice(-2).join(" · ");
+        resolve({
+          run,
+          error: /timed out|ETIMEDOUT/i.test(String(err.message))
+            ? "Le balayage des boards a dépassé le temps imparti — réduis `pages` sur les entrées lentes de portals.yml."
+            : fin || String(err.message),
+          lance: true,
+        });
+      },
+    );
+  });
+}
+
 /** Les intitulés visés, depuis config/profile.yml. Absent ou illisible => aucun
  *  signal d'intitulé, jamais une cible devinée. */
 function ciblesProfil(): string[] {
@@ -119,8 +193,31 @@ export async function GET(req: Request) {
   const dry = sp.get("dry") === "1";
   const rescan = sp.get("rescan") !== "0";
 
+  // `boards=0` coupe le balayage des boards de portals.yml. Activé par défaut :
+  // un board configuré et jamais balayé est le défaut qu'on vient de corriger,
+  // pas une option à réactiver.
+  const avecBoards = sp.get("boards") !== "0";
+
   let charge: ChargeScanner | null = null;
   let error: string | null = null;
+  let boards: Awaited<ReturnType<typeof lancerScanBoards>> | null = null;
+
+  // LES BOARDS D'ABORD, et l'ordre porte une décision de budget. Les deux
+  // scanners se partagent le plafond de 300 s de la route ; celui des boards est
+  // borné et rapide (quelques dizaines de secondes, il balaie une liste finie),
+  // celui des annuaires est celui qui sature son `limit`. Le lancer en second
+  // avec le temps restant fait que c'est LUI qui rend une moisson partielle —
+  // ce qu'il annonce déjà par `plafond_atteint` — au lieu de faire sauter les
+  // boards en silence.
+  //
+  // Séquentiel et non parallèle : les deux écrivent dans data/pipeline.md, et
+  // même si `pipeline-lock` le rend sûr, deux balayages concurrents se
+  // disputeraient le verrou pour ne rien gagner (leur coût est le réseau).
+  const debut = Date.now();
+  if (rescan && avecBoards) {
+    boards = await lancerScanBoards({ dry, timeoutMs: 120_000 });
+  }
+
   if (rescan) {
     const args = [
       "--since",
@@ -131,7 +228,10 @@ export async function GET(req: Request) {
       filtres.ats.join(","),
       ...(dry ? ["--dry-run"] : []),
     ];
-    ({ charge, error } = await lancerScan(args));
+    // Le reste du budget, jamais moins de 30 s : un plafond dérisoire ferait
+    // échouer le balayage sur un timeout plutôt que sur son propre plafond.
+    const restant = Math.max(30_000, 280_000 - (Date.now() - debut));
+    ({ charge, error } = await lancerScan(args, restant));
   }
 
   // pipeline.md est relu APRÈS le scan : c'est là que les nouvelles offres ont
@@ -189,6 +289,29 @@ export async function GET(req: Request) {
           interrompu: Boolean(charge.stoppedByOutage),
           dataset: charge.datasetStatus ?? null,
           apercu: dry,
+        }
+      : null,
+    // Le balayage des `job_boards` de portals.yml — APEC, Choisir le Service
+    // Public, Emploi Territorial, HelloWork, SolidJobs… Distinct de `scan`
+    // ci-dessus, qui parcourt les annuaires d'ATS : deux gisements différents,
+    // deux jeux de compteurs, et les mélanger empêcherait de savoir lequel
+    // rapporte.
+    //
+    // `null` = non lancé (rescan=0 ou boards=0). Compteurs `null` en aperçu :
+    // un --dry-run ne persiste aucune ligne de tournée, et inventer des zéros
+    // ferait passer un aperçu pour une tournée vide.
+    boards: boards
+      ? {
+          lance: boards.lance,
+          apercu: dry,
+          erreur: boards.error,
+          balayes: compteur(boards.run?.boards),
+          offres_trouvees: compteur(boards.run?.found),
+          ajoutees_au_pipeline: compteur(boards.run?.new_added),
+          ecartees_par_intitule: compteur(boards.run?.filtered_title),
+          ecartees_par_lieu: compteur(boards.run?.filtered_location),
+          doublons: compteur(boards.run?.dupes),
+          erreurs_de_source: compteur(boards.run?.errors),
         }
       : null,
     pipeline: {
