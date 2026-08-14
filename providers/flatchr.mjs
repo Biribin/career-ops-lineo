@@ -172,7 +172,10 @@ export function normalizeFlatchrItem(item, cible, fallbackCompany = 'Flatchr') {
   const title = txt(v.title);
   const slug = txt(v.slug);
   if (!title || !slug) return null;
-  if (!/^[A-Za-z0-9._~-]+$/.test(slug)) return null;
+  // The slug is concatenated into a URL. Dots are allowed because real slugs
+  // carry them, which is exactly why the dot SEGMENTS have to be excluded
+  // explicitly: a bare `..` would otherwise build a URL that climbs a level.
+  if (!/^[A-Za-z0-9._~-]+$/.test(slug) || slug === '.' || slug === '..' || slug.includes('..')) return null;
 
   let location = buildLocation(v.address);
   if (estTeletravail(v.remote)) location = location ? `${location} · Télétravail` : 'Télétravail';
