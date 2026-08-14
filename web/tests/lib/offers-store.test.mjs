@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { courrielContact, etatCourant, ligneDecision, lignesAAjouter, lignesNonRetenues, normaliseOffreRecue, offreComplete, parseJournal, STATUTS_CLASSANTS } from "../../src/lib/offers-store.mjs";
+import { cleDeLigne, clesDuJournal, courrielContact, etatCourant, ligneDecision, lignesAAjouter, lignesNonRetenues, normaliseOffreRecue, offreComplete, parseJournal, STATUTS_CLASSANTS } from "../../src/lib/offers-store.mjs";
 
 const T = "2026-08-06T12:00:00.000Z";
 const T2 = "2026-08-07T12:00:00.000Z";
@@ -174,6 +174,100 @@ test("une offre a laquelle Lineo a postule LUI-MEME sort aussi de la file", () =
     { jobId: "D", title: "postulee a la main", score: 60, vu_le: T2 },
   ]);
   assert.deepEqual(etat, []);
+});
+
+// ── Le MEME poste sous un AUTRE identifiant France Travail ───────────────────
+//
+// Mesure du 2026-08-14 : 1 150 identifiants pour 783 postes identifiables, 35
+// identifiants en trop dans la tournee, 7 postes revenus le lendemain sous un
+// identifiant neuf. Le symptome signale par Lineo : « les offres que je rejette
+// reviennent ».
+
+test("LE test qui compte (bis) : ecarter une offre ecarte AUSSI son jumeau reposte sous un autre id", () => {
+  const journal = [
+    { jobId: "212GLHJ", company: "DCARTE ENGINEERING SA", title: "Analyste décisionnel - Business Intelligence (H/F)", location: "France", score: 55, statut: "A_DECIDER", vu_le: T },
+    ligneDecision("212GLHJ", "ecarter", T),
+    // Le lendemain, la meme annonce revient avec un identifiant neuf.
+    { jobId: "212GLHM", company: "DCARTE ENGINEERING SA", title: "Analyste décisionnel - Business Intelligence   (H/F)", location: "France", score: 55, statut: "A_DECIDER", vu_le: T2 },
+  ];
+  assert.deepEqual(etatCourant(journal), [], "le jumeau ne doit pas revenir dans la file");
+});
+
+test("les jumeaux encore en attente sont fondus en UNE carte, la mieux notee gagne", () => {
+  // Deux fois la meme annonce a decider n'apporte rien, et laisse croire a deux
+  // opportunites distinctes.
+  const etat = etatCourant([
+    { jobId: "211RFKC", company: "Wemanity Paris", title: "Ingénieur IA / Data (H/F)", location: "59 - Lille", score: 61, statut: "A_DECIDER", vu_le: T },
+    { jobId: "211TYDC", company: "Wemanity Paris", title: "Ingénieur IA / Data (H/F)", location: "59 - LILLE", score: 74, statut: "A_DECIDER", vu_le: T2 },
+  ]);
+  assert.deepEqual(etat.map((o) => o.jobId), ["211TYDC"]);
+});
+
+test("une offre GENEREE bloque aussi son jumeau : sinon on candidate deux fois chez le meme employeur", () => {
+  const etat = etatCourant([
+    { jobId: "A1", company: "Framatome", title: "DATA ENGINEER AND BUSINESS TOOL DEVELOPER F/H", location: "92 - Courbevoie", score: 70, vu_le: T },
+    ligneDecision("A1", "generer", T),
+    { jobId: "A2", company: "Framatome", title: "DATA ENGINEER AND BUSINESS TOOL DEVELOPER F/H", location: "92 - Courbevoie", score: 70, vu_le: T2 },
+  ]);
+  assert.deepEqual(etat, []);
+});
+
+test("deux villes ou deux employeurs ne se masquent PAS l'un l'autre", () => {
+  // Le garde-fou : une decision ne doit jamais faire disparaitre une offre que
+  // Lineo n'a pas vue.
+  const etat = etatCourant([
+    { jobId: "L1", company: "Adecco France", title: "Technicien de Maintenance (H/F)", location: "69 - LYON", score: 50, vu_le: T },
+    ligneDecision("L1", "ecarter", T),
+    { jobId: "P1", company: "Adecco France", title: "Technicien de Maintenance (H/F)", location: "75 - PARIS", score: 50, vu_le: T2 },
+    { jobId: "C1", company: "Capgemini", title: "Technicien de Maintenance (H/F)", location: "69 - LYON", score: 50, vu_le: T2 },
+  ]);
+  assert.deepEqual(etat.map((o) => o.jobId).sort(), ["C1", "P1"]);
+});
+
+test("sans employeur, rien n'est fusionne : deux « Chef de projet IA » anonymes restent deux offres", () => {
+  const etat = etatCourant([
+    { jobId: "X1", company: "", title: "Chef de projet IA (H/F)", location: "75 - PARIS", score: 50, vu_le: T },
+    { jobId: "X2", company: "", title: "Chef de projet IA (H/F)", location: "75 - PARIS", score: 50, vu_le: T2 },
+  ]);
+  assert.equal(etat.length, 2);
+});
+
+test("la cle du tri est ECRITE au journal, et prevaut sur un recalcul", () => {
+  // Le modele reformate parfois l'intitule : une cle recalculee sur SA version ne
+  // correspondrait plus a celle que la tournee suivante calcule sur les donnees
+  // brutes de France Travail.
+  const { lignes } = lignesAAjouter(
+    { jobs: [{ jobId: "A", company: "Acme", title: "Titre reformate par le modele", location: "75 - PARIS", cle: "acme | data engineer | paris" }] },
+    T,
+  );
+  assert.equal(lignes[0].cle, "acme | data engineer | paris");
+  // Sans cle fournie (offre ajoutee a la main), elle est calculee sur place.
+  const { lignes: l2 } = lignesAAjouter({ jobs: [{ jobId: "B", company: "Acme", title: "Data Engineer (H/F)", location: "75 - PARIS" }] }, T);
+  assert.equal(l2[0].cle, "acme | data engineer | paris");
+  // Et jamais de champ `cle` vide qui polluerait le journal.
+  const { lignes: l3 } = lignesAAjouter({ jobs: [{ jobId: "C", title: "sans employeur" }] }, T);
+  assert.ok(!("cle" in l3[0]));
+});
+
+test("cleDeLigne rattrape l historique : les lignes ecrites avant ce champ sont couvertes", () => {
+  // Sans ce recalcul, la correction ne servirait qu'aux offres futures — or c'est
+  // justement l'historique deja ecarte que Lineo ne veut plus revoir.
+  assert.equal(
+    cleDeLigne({ jobId: "vieux", company: "Acme", title: "Data Engineer (H/F)", location: "75 - PARIS" }),
+    "acme | data engineer | paris",
+  );
+  assert.equal(cleDeLigne({ jobId: "x" }), null);
+  assert.equal(cleDeLigne(null), null);
+});
+
+test("clesDuJournal ramasse toutes les identites, tous statuts confondus", () => {
+  const cles = clesDuJournal([
+    { jobId: "A", company: "Acme", title: "Data Engineer (H/F)", location: "75 - PARIS", statut: "A_DECIDER" },
+    { jobId: "B", company: "Acme", title: "Autre poste (H/F)", location: "75 - PARIS", statut: "NON_RETENUE" },
+    ligneDecision("A", "ecarter", T), // ligne de decision : aucune identite propre
+    { jobId: "C", title: "sans employeur", statut: "A_DECIDER" },
+  ]);
+  assert.deepEqual([...cles].sort(), ["acme | autre poste | paris", "acme | data engineer | paris"]);
 });
 
 test("ligneDecision refuse ce qui n'est pas une decision", () => {

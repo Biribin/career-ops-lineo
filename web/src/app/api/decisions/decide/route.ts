@@ -9,6 +9,7 @@ import {
   dejaClose,
   estDecision,
   lireJournal,
+  porteDisparue,
   type Decision,
   type Fiche,
 } from "@/lib/n8n-decisions.mjs";
@@ -271,13 +272,27 @@ export async function POST(req: Request) {
     journalErreur = e instanceof Error ? e.message : "écriture du journal impossible";
   }
 
-  const ok = n8nStatus != null && n8nStatus < 400;
+  const transmis = n8nStatus != null && n8nStatus < 400;
+  // Un REFUS que n8n n'attendait plus est quand même une décision aboutie : rien
+  // ne devait partir, le tracker porte la raison, et la fiche est close ici (cf.
+  // closEnLocal dans n8n-decisions.mjs). Répondre 502 sur ce cas était ce qui
+  // laissait Linéo refuser une candidature qui revenait au chargement suivant.
+  //
+  // Pour `valider`, la porte disparue reste un ÉCHEC : le mail n'est pas parti.
+  const closLocalement = dec === "refuser" && !transmis && porteDisparue(n8nStatus);
+  const ok = transmis || closLocalement;
   return Response.json(
     {
       ok,
       decision: dec,
       n8nStatus,
       n8nError,
+      transmis,
+      closLocalement,
+      // Ce qui s'est réellement passé, en une phrase affichable telle quelle.
+      avertissement: closLocalement
+        ? "n8n n'attendait plus cette candidature : le refus est enregistré ici (tracker + journal) et la fiche ne reviendra plus. Rien n'a été envoyé, ce qui est le comportement voulu pour un refus."
+        : undefined,
       tracker: dec === "refuser" ? tracker : null,
       portail: dec === "valider" ? portail : null,
       journalErreur,

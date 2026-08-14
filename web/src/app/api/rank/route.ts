@@ -1,6 +1,7 @@
 import { erreurOpenAi, executeLlm } from "@/lib/llm-runner";
 import { lireFiltresPortals, motsClesFranceTravail } from "@/lib/core/portals";
 import { litJournalOffres } from "@/lib/offers-journal";
+import { clesDuJournal } from "@/lib/offers-store.mjs";
 import { MAX_OFFRES, SCORE_MINIMUM, parseRank, prepareLot, promptRank, trieParPlancher } from "@/lib/rank.mjs";
 import { profilCv } from "@/lib/profil-cv";
 
@@ -52,11 +53,16 @@ export async function POST(req: Request) {
   // Le journal est lu ICI et pas reçu de n8n : c'est career-ops qui l'écrit, lui
   // seul en connaît l'état au moment du tri. Le faire porter par le workflow
   // recréerait la deuxième source de vérité qu'on a supprimée côté recherche.
+  //
+  // Deux niveaux, parce qu'un seul ne suffit pas : France Travail republie la
+  // même annonce sous plusieurs jobId, si bien qu'une offre écartée revenait
+  // malgré ce filtre. `clesConnues` porte donc l'identité du POSTE
+  // (employeur + intitulé + ville, cf. cle-job.mjs) en plus de l'identifiant.
+  const journal = litJournalOffres();
   const dejaVus = new Set(
-    litJournalOffres()
-      .map((l) => String(l.jobId ?? "").trim())
-      .filter(Boolean),
+    journal.map((l) => String(l.jobId ?? "").trim()).filter(Boolean),
   );
+  const clesConnues = clesDuJournal(journal);
 
   const filtres = lireFiltresPortals();
 
@@ -66,6 +72,7 @@ export async function POST(req: Request) {
   const lot = prepareLot(brutes, {
     maxOffres: MAX_OFFRES,
     dejaVus,
+    clesConnues,
     motsCles: [...filtres.positive, ...motsClesFranceTravail()],
   });
   if (lot.offres.length === 0) {
@@ -76,6 +83,7 @@ export async function POST(req: Request) {
         doublons: lot.doublons,
         sansId: lot.sansId,
         dejaVues: lot.dejaVues,
+        jumeaux: lot.jumeaux,
         alternances: lot.alternances,
         tronquees: lot.tronquees,
       },
@@ -148,6 +156,8 @@ export async function POST(req: Request) {
       doublons: lot.doublons,
       sansId: lot.sansId,
       dejaVues: lot.dejaVues,
+      // La même annonce sous un autre identifiant, écartée avant le modèle.
+      jumeaux: lot.jumeaux,
       alternances: lot.alternances,
       tronquees: lot.tronquees,
       // Sur les offres envoyées au modèle, combien portent un mot-clé dans leur

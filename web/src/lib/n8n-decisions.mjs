@@ -112,6 +112,36 @@ export function argsRefusTracker({ scriptPath, entreprise = "", poste = "", rais
 const TERMINALES = new Set(["valider", "refuser"]);
 
 /**
+ * Les réponses qui disent que la PORTE N'EXISTE PLUS : l'exécution n8n a été
+ * reprise, a expiré, ou le workflow a été rechargé. Ce n'est pas une panne
+ * passagère — re-POSTer n'y changera jamais rien.
+ *
+ * Distinguer ces deux cas est ce qui répare le symptôme signalé par Linéo (« les
+ * offres que je rejette reviennent ») : un refus qui tombait sur un 404 restait
+ * non transmis, donc la fiche restait affichée, à chaque chargement de page, pour
+ * toujours — et le fichier de la fiche, lui, ne quitte jamais data-inbox.
+ */
+const PORTE_DISPARUE = new Set([404, 410]);
+
+/**
+ * Vrai si un REFUS a bien été enregistré ici alors que n8n n'attendait plus.
+ *
+ * Réservé au refus, volontairement. Un refus n'envoie rien à personne : le
+ * tracker est écrit, la raison est au journal, la décision de Linéo est prise et
+ * complète — la garder à l'écran ne lui demande rien qu'il puisse faire.
+ *
+ * `valider` sur une porte disparue est l'inverse : le mail N'EST PAS parti. La
+ * fiche doit rester visible, même si aucun re-POST ne la débloquera, parce que la
+ * faire disparaître ferait passer une candidature approuvée mais jamais envoyée
+ * pour une candidature envoyée.
+ *
+ * @param {Journal} d
+ */
+function closEnLocal(d) {
+  return d.decision === "refuser" && d.n8nStatus != null && PORTE_DISPARUE.has(d.n8nStatus);
+}
+
+/**
  * @param {unknown} v
  * @returns {v is Decision}
  */
@@ -220,14 +250,31 @@ export function ajouterAuJournal(journalPath, entree) {
 }
 
 /**
- * Vrai si une décision terminale a déjà été transmise pour cet id — le garde
- * anti-double-clic côté serveur.
+ * Vrai si cette candidature est TRANCHÉE — le garde anti-double-clic côté
+ * serveur, et le filtre de la liste « À valider ».
+ *
+ * Deux façons de l'être, et la seconde n'est pas une tolérance : soit n8n a
+ * accepté une décision terminale, soit c'était un refus et n8n n'attendait plus
+ * (cf. closEnLocal). Sans ce second cas, un refus arrivé après l'expiration de
+ * l'exécution laissait la fiche à l'écran indéfiniment : Linéo la refusait, elle
+ * revenait, et aucun clic ne pouvait plus rien y faire.
  *
  * @param {Journal[]} journal
  * @param {string} id
  */
 export function dejaClose(journal, id) {
-  return journal.some((j) => j.id === id && TERMINALES.has(j.decision) && transmise(j));
+  return journal.some((j) => j.id === id && ((TERMINALES.has(j.decision) && transmise(j)) || closEnLocal(j)));
+}
+
+/**
+ * Vrai si n8n a fait savoir qu'il n'attendait plus cette décision. Exporté pour
+ * que la route puisse répondre « enregistré ici » plutôt que « échec », sans
+ * réécrire le test des codes.
+ *
+ * @param {number|null|undefined} n8nStatus
+ */
+export function porteDisparue(n8nStatus) {
+  return n8nStatus != null && PORTE_DISPARUE.has(n8nStatus);
 }
 
 /**

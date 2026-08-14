@@ -25,9 +25,15 @@ import {
   trieParPlancher,
 } from "../../src/lib/rank.mjs";
 
+// L'intitulé porte l'identifiant par DÉFAUT, et ce n'est pas cosmétique : depuis
+// le filtre anti-jumeaux, deux annonces de même employeur, même intitulé et même
+// ville SONT le même poste (cf. cle-job.mjs). Une fixture qui donnait le même
+// intitulé à toutes les offres ne décrivait donc plus « N offres distinctes »
+// mais « N republications d'une seule ». Les tests qui veulent des jumeaux
+// passent un `intitule` identique explicitement.
 const offreFT = (id, over = {}) => ({
   id,
-  intitule: "Ingénieur automatisation",
+  intitule: `Ingénieur automatisation ${id}`,
   description: "n8n, API REST, PostgreSQL. ".repeat(50),
   entreprise: { nom: "ACME" },
   lieuTravail: { libelle: "75 - Paris" },
@@ -84,6 +90,104 @@ test("une offre déjà au journal ne repart JAMAIS au tri", () => {
   );
   assert.equal(lot.dejaVues, 2, "le compte doit etre annonce, pas silencieux");
   assert.equal(lot.doublons, 0, "deja vue n'est pas un doublon de tournee");
+});
+
+// -- Le MEME poste sous un AUTRE identifiant France Travail -------------------
+//
+// Mesure de la tournee du 2026-08-14 : 1 650 reponses brutes, 1 150 identifiants
+// uniques pour 783 postes identifiables. 35 identifiants en trop DANS la tournee,
+// et 7 postes de la veille revenus sous un identifiant neuf. `dejaVus`, qui ne
+// connait que l'identifiant, les laissait tous passer : ils occupaient une des
+// 150 places et se faisaient rediger un whyMatch pour rien.
+
+test("le meme poste republie sous un autre identifiant ne repart pas au tri", () => {
+  const brutes = [
+    offreFT("212GLHJ", { intitule: "Analyste décisionnel - Business Intelligence (H/F)", entreprise: { nom: "DCARTE ENGINEERING SA" }, lieuTravail: { libelle: "France" } }),
+    offreFT("NEUVE"),
+  ];
+  const lot = prepareLot(brutes, {
+    // L'offre a deja ete tranchee la veille sous l'identifiant 212GLHM.
+    clesConnues: new Set(["dcarte engineering sa | analyste business decisionnel intelligence | france"]),
+  });
+  assert.deepEqual(lot.offres.map((o) => o.jobId), ["NEUVE"]);
+  assert.equal(lot.dejaVues, 1, "compte annonce, pas silencieux");
+});
+
+test("deux jumeaux du MEME lot n'occupent qu'une place", () => {
+  // Cas reel : « Développeur IA - Metz (H/F) » et « Développeur IA (H/F) - Metz ».
+  const brutes = [
+    offreFT("A1", { intitule: "Développeur IA  - Metz (H/F)", entreprise: { nom: "Atos" }, lieuTravail: { libelle: "57 - Metz" } }),
+    offreFT("A2", { intitule: "Développeur IA (H/F) - Metz", entreprise: { nom: "ATOS" }, lieuTravail: { libelle: "57 - METZ" } }),
+  ];
+  const lot = prepareLot(brutes);
+  assert.equal(lot.offres.length, 1);
+  assert.equal(lot.jumeaux, 1);
+  assert.equal(lot.doublons, 0, "un jumeau n'est pas un doublon d'identifiant");
+  assert.equal(lot.dejaVues, 0, "ni une offre deja tranchee");
+});
+
+test("le filtre anti-jumeaux ne touche PAS ce qu'il ne sait pas identifier", () => {
+  // Sans employeur, deux annonces de meme intitule restent deux offres : 332 des
+  // 1 150 offres du 2026-08-14 n'avaient aucun nom d'entreprise, et les fusionner
+  // masquerait des postes que Lineo n'a jamais vus.
+  const brutes = [
+    offreFT("X1", { intitule: "Chef de projet IA (H/F)", entreprise: {} }),
+    offreFT("X2", { intitule: "Chef de projet IA (H/F)", entreprise: {} }),
+  ];
+  const lot = prepareLot(brutes);
+  assert.equal(lot.offres.length, 2);
+  assert.equal(lot.jumeaux, 0);
+});
+
+test("une ville differente chez le meme employeur reste un poste distinct", () => {
+  const brutes = [
+    offreFT("L1", { intitule: "Technicien de Maintenance (H/F)", entreprise: { nom: "Adecco France" }, lieuTravail: { libelle: "69 - LYON" } }),
+    offreFT("P1", { intitule: "Technicien de Maintenance (H/F)", entreprise: { nom: "Adecco France" }, lieuTravail: { libelle: "75 - PARIS" } }),
+  ];
+  const lot = prepareLot(brutes);
+  assert.equal(lot.offres.length, 2, "Paris ne doit pas disparaitre parce que Lyon existe");
+});
+
+test("clesConnues accepte un tableau autant qu'un Set, et son absence ne change rien", () => {
+  const brutes = [offreFT("A", { intitule: "Data Engineer (H/F)", entreprise: { nom: "Acme" }, lieuTravail: { libelle: "75 - PARIS" } }), offreFT("B")];
+  const avec = prepareLot(brutes, { clesConnues: ["acme | data engineer | paris"] });
+  assert.deepEqual(avec.offres.map((o) => o.jobId), ["B"]);
+  const sans = prepareLot(brutes);
+  assert.equal(sans.offres.length, 2);
+  assert.equal(sans.jumeaux, 0);
+});
+
+test("les comptes du lot restent coherents : rien ne se perd en silence", () => {
+  const brutes = [
+    offreFT("A1", { intitule: "Data Engineer (H/F)", entreprise: { nom: "Acme" }, lieuTravail: { libelle: "75 - PARIS" } }),
+    offreFT("A2", { intitule: "Data Engineer (H/F)", entreprise: { nom: "Acme" }, lieuTravail: { libelle: "75 - PARIS" } }), // jumeau
+    offreFT("A1", { intitule: "Data Engineer (H/F)", entreprise: { nom: "Acme" }, lieuTravail: { libelle: "75 - PARIS" } }), // doublon d'identifiant
+    offreFT("VU"),
+    offreFT("ALT", { intitule: "Alternance automatisation" }),
+    { intitule: "sans id" },
+    offreFT("NEUVE"),
+  ];
+  const lot = prepareLot(brutes, { dejaVus: ["VU"] });
+  const total = brutes.length;
+  assert.equal(lot.offres.length + lot.sansId + lot.dejaVues + lot.jumeaux + lot.alternances + lot.doublons, total);
+  assert.equal(lot.jumeaux, 1);
+  assert.equal(lot.doublons, 1);
+  assert.equal(lot.dejaVues, 1);
+  assert.equal(lot.alternances, 1);
+  assert.equal(lot.sansId, 1);
+});
+
+test("parseRank transporte l'identite du poste, calculee sur l'offre D'ORIGINE", () => {
+  // Le modele reformate parfois l'intitule. Recalculer la cle sur SA version la
+  // ferait diverger de celle que la tournee suivante calcule sur les donnees
+  // brutes de France Travail : le filtre anti-jumeaux raterait exactement les
+  // offres pour lesquelles il existe.
+  const source = normaliseOffre(offreFT("A", { intitule: "Data Engineer (H/F)", entreprise: { nom: "Acme" }, lieuTravail: { libelle: "75 - PARIS" } }));
+  const { jobs } = parseRank(
+    JSON.stringify({ jobs: [{ jobId: "A", title: "Data Engineer — Acme (reformate par le modele)", score: 70 }] }),
+    { offresConnues: [source] },
+  );
+  assert.equal(jobs[0].cle, "acme | data engineer | paris");
 });
 
 test("les offres déjà vues ne mangent pas les places du plafond", () => {
@@ -202,8 +306,10 @@ test("« stagiaire » ne doit pas attraper un mot qui le contient par hasard", (
 });
 
 test("cibleesGardees mesure ce que la troncature a réellement retenu", () => {
-  const cibles = [...Array(3)].map((_, i) => offreFT(`C${i}`, { intitule: "Ingénieur automatisation" }));
-  const bruit = [...Array(5)].map((_, i) => offreFT(`B${i}`, { intitule: "Conducteur de ligne", description: "x" }));
+  // Intitulés distincts : trois annonces de même employeur, même intitulé et même
+  // ville seraient désormais le même poste, et la mesure porterait sur 1 offre.
+  const cibles = [...Array(3)].map((_, i) => offreFT(`C${i}`, { intitule: `Ingénieur automatisation niveau ${i}` }));
+  const bruit = [...Array(5)].map((_, i) => offreFT(`B${i}`, { intitule: `Conducteur de ligne ${i}`, description: "x" }));
   const lot = prepareLot([...bruit, ...cibles], { maxOffres: 3, motsCles: CLES });
   assert.equal(lot.cibleesGardees, 3, "les 3 places doivent aller aux 3 offres ciblées");
 });

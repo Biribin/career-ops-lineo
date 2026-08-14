@@ -10,6 +10,8 @@
 // réécrit jamais une ligne. L'historique des tournées est ainsi vérifiable, et
 // deux écritures concurrentes ne peuvent pas se perdre l'une l'autre.
 
+import { cleJob } from "./cle-job.mjs";
+
 /** Une offre est identifiée par son jobId France Travail. */
 const txt = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
 
@@ -63,6 +65,11 @@ export function normaliseOffreRecue(brut) {
     // accepte les trois plutôt que d'imposer un renommage en amont, mais une
     // seule sortie normalisée.
     contactEmail: courrielContact(o.contactEmail ?? o.contact_email ?? o.courriel),
+    // L'identité du poste calculée en amont sur l'offre d'origine (cf. parseRank).
+    // On la garde telle quelle plutôt que de la recalculer : le modèle reformate
+    // parfois l'intitulé, et une clé recalculée sur SA version ne correspondrait
+    // plus à celle du tri de la tournée suivante.
+    cle: txt(o.cle),
   };
 }
 
@@ -85,8 +92,18 @@ export function lignesAAjouter(corps, vuLe) {
       ecartees += 1;
       continue;
     }
+    // `cle` : l'identité du POSTE, écrite au moment où l'offre entre au journal.
+    // Elle est ce qui rend une décision de Linéo valable pour les jumeaux de
+    // l'annonce (voir cle-job.mjs). Celle du tri est préférée — elle vient de
+    // l'offre brute ; à défaut on la recalcule, pour qu'une offre POSTée à la
+    // main (sans passer par /api/rank) en ait quand même une. Absente quand
+    // l'employeur ou l'intitulé manque : la ligne reste alors gérée par son seul
+    // jobId, comme avant.
+    const cle = o.cle || cleJob(o);
+    const { cle: _ignore, ...offre } = o;
     retenues.push({
-      ...o,
+      ...offre,
+      ...(cle ? { cle } : {}),
       statut: "A_DECIDER",
       vu_le: vuLe,
       source: txt(c.source) || "n8n",
@@ -178,6 +195,42 @@ export function ligneDecision(jobId, action, quand) {
 }
 
 /**
+ * L'identité de poste d'une ligne de journal.
+ *
+ * Lue depuis `cle` quand la ligne en porte une, RECALCULÉE sinon. Le recalcul
+ * n'est pas un détail : les lignes écrites avant l'existence de ce champ n'ont
+ * pas de `cle`, et sans lui la correction ne servirait qu'aux offres futures —
+ * or c'est justement l'historique déjà écarté que Linéo ne veut plus revoir.
+ *
+ * @param {Record<string, unknown>} ligne
+ * @returns {string|null}
+ */
+export function cleDeLigne(ligne) {
+  if (!ligne || typeof ligne !== "object") return null;
+  const deja = txt(ligne.cle);
+  if (deja) return deja;
+  return cleJob({ company: ligne.company, title: ligne.title, location: ligne.location });
+}
+
+/**
+ * Toutes les identités de poste présentes au journal, quel que soit le statut.
+ *
+ * Sert au tri (`/api/rank`) : une annonce dont le poste est déjà passé par ici
+ * n'a rien à faire dans un lot de découverte, même sous un identifiant neuf.
+ *
+ * @param {Array<Record<string, unknown>>} journal
+ * @returns {Set<string>}
+ */
+export function clesDuJournal(journal) {
+  const out = new Set();
+  for (const ligne of Array.isArray(journal) ? journal : []) {
+    const cle = cleDeLigne(ligne);
+    if (cle) out.add(cle);
+  }
+  return out;
+}
+
+/**
  * Réduit un journal append-only à l'état courant.
  *
  * Une offre revue lors d'une tournée suivante écrase la précédente : c'est la
@@ -192,16 +245,36 @@ export function ligneDecision(jobId, action, quand) {
  * D'où le balayage préalable : un `ECARTEE` ou un `GENEREE` n'importe où dans
  * l'historique sort l'offre pour de bon.
  *
+ * ⚠️⚠️ ET CE BALAYAGE PORTE SUR LE POSTE, PAS SUR L'IDENTIFIANT. France Travail
+ * republie la même annonce sous plusieurs jobId (mesuré : 35 identifiants en
+ * trop sur la tournée du 2026-08-14, et 7 postes revenus le lendemain sous un
+ * identifiant neuf). Une décision qui ne collait qu'à l'identifiant laissait
+ * donc le jumeau dans la file, puis le laissait revenir — le symptôme que Linéo
+ * a signalé. Les jumeaux encore en attente sont par ailleurs fondus en UNE
+ * carte : deux fois la même annonce à décider n'apporte rien et fait croire à
+ * deux opportunités.
+ *
  * @param {Array<Record<string, unknown>>} journal
  */
 export function etatCourant(journal) {
   const lignes = Array.isArray(journal) ? journal : [];
 
   const classees = new Set();
+  const clesClassees = new Set();
   for (const ligne of lignes) {
     if (!ligne || typeof ligne !== "object") continue;
     const jobId = txt(ligne.jobId);
     if (jobId && STATUTS_CLASSANTS.includes(txt(ligne.statut))) classees.add(jobId);
+  }
+  // Deuxième passe : une ligne de DÉCISION ne porte ni entreprise ni intitulé
+  // (voir ligneDecision), donc son identité de poste ne peut venir que d'une
+  // ligne de CONTENU portant le même jobId. D'où deux passes et pas une.
+  for (const ligne of lignes) {
+    if (!ligne || typeof ligne !== "object") continue;
+    const jobId = txt(ligne.jobId);
+    if (!jobId || !classees.has(jobId)) continue;
+    const cle = cleDeLigne(ligne);
+    if (cle) clesClassees.add(cle);
   }
 
   const parId = new Map();
@@ -209,16 +282,30 @@ export function etatCourant(journal) {
     if (!ligne || typeof ligne !== "object") continue;
     const jobId = txt(ligne.jobId);
     if (!jobId || classees.has(jobId)) continue;
+    const cle = cleDeLigne(ligne);
+    if (cle && clesClassees.has(cle)) continue;
     parId.set(jobId, ligne);
   }
 
   // Les mieux notées d'abord, puis les plus récentes : c'est l'ordre dans lequel
   // Linéo veut les voir pour décider.
-  return [...parId.values()].sort((a, b) => {
+  const triees = [...parId.values()].sort((a, b) => {
     const sa = typeof a.score === "number" ? a.score : -1;
     const sb = typeof b.score === "number" ? b.score : -1;
     if (sb !== sa) return sb - sa;
     return String(b.vu_le ?? "").localeCompare(String(a.vu_le ?? ""));
+  });
+
+  // Les jumeaux restants fondus en une carte. Le tri précède la fusion, donc
+  // c'est la MIEUX NOTÉE qui survit — pas la première rencontrée dans le
+  // fichier. Une offre sans identité de poste n'est jamais fusionnée.
+  const vues = new Set();
+  return triees.filter((ligne) => {
+    const cle = cleDeLigne(ligne);
+    if (!cle) return true;
+    if (vues.has(cle)) return false;
+    vues.add(cle);
+    return true;
   });
 }
 
