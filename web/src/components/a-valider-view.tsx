@@ -204,6 +204,9 @@ function Carte({ fiche, onDecide }: { fiche: Fiche; onDecide: () => void }) {
         ok?: boolean;
         error?: string;
         n8nError?: string | null;
+        transmis?: boolean;
+        closLocalement?: boolean;
+        avertissement?: string;
         tracker?: { applique: boolean; erreur: string | null } | null;
         journalErreur?: string | null;
       };
@@ -212,12 +215,16 @@ function Carte({ fiche, onDecide }: { fiche: Fiche; onDecide: () => void }) {
         return;
       }
       const avertissements: string[] = [];
+      // Un refus enregistré alors que n8n n'attendait plus : c'est un succès, mais
+      // il ne faut PAS lui laisser dire « transmis à n8n », ce qui serait faux.
+      if (j.avertissement) avertissements.push(j.avertissement);
       if (j.tracker && !j.tracker.applique && j.tracker.erreur) {
         avertissements.push(`tracker non mis à jour : ${j.tracker.erreur}`);
       }
       if (j.journalErreur) avertissements.push(`journal : ${j.journalErreur}`);
       setSucces(
-        `${LIBELLE[d]} — transmis à n8n.` + (avertissements.length ? ` ⚠️ ${avertissements.join(" · ")}` : ""),
+        `${LIBELLE[d]} — ${j.closLocalement ? "enregistré ici" : "transmis à n8n"}.` +
+          (avertissements.length ? ` ⚠️ ${avertissements.join(" · ")}` : ""),
       );
       setOuvert(null);
       setTexte("");

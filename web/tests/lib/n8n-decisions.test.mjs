@@ -17,8 +17,10 @@ import {
   dejaClose,
   estDecision,
   fichesEnAttente,
+  fichesEnAttenteDepuis,
   lireFiches,
   lireJournal,
+  porteDisparue,
   argsRefusTracker,
 } from "../../src/lib/n8n-decisions.mjs";
 
@@ -154,6 +156,54 @@ test("dejaClose est le garde anti-double-clic, et ne se déclenche pas sur une r
   assert.equal(dejaClose(journal, "c"), false, "une retouche ne clôt pas la candidature");
   assert.equal(dejaClose(journal, "d"), false, "un POST en échec ne clôt rien");
   assert.equal(dejaClose(journal, "inconnu"), false);
+});
+
+// ── Quand n8n N'ATTEND PLUS (404/410) ────────────────────────────────────────
+//
+// Le symptôme signalé par Linéo : une candidature refusée revenait. Cause : une
+// fiche ne quittait la liste que si n8n ACCEPTAIT la décision. Or une exécution
+// reprise, expirée ou un workflow rechargé rendent 404 — et le fichier de la
+// fiche, lui, reste indéfiniment dans data-inbox. La fiche revenait donc à chaque
+// chargement de page, et aucun clic ne pouvait plus rien y faire.
+
+test("un REFUS que n8n n'attendait plus clôt quand même la candidature", () => {
+  for (const code of [404, 410]) {
+    const journal = [{ id: "r", decision: "refuser", raison: "salaire", at: "x", n8nStatus: code }];
+    assert.equal(dejaClose(journal, "r"), true, `code ${code}`);
+  }
+});
+
+test("un refus sur une panne PASSAGÈRE ne clôt rien : il doit rester réessayable", () => {
+  // 502/503/timeout = n8n attend peut-être encore. Fermer ici ferait perdre la
+  // seule occasion de débloquer réellement l'exécution.
+  for (const status of [500, 502, 503, null]) {
+    const journal = [{ id: "r", decision: "refuser", raison: "salaire", at: "x", n8nStatus: status }];
+    assert.equal(dejaClose(journal, "r"), false, `statut ${String(status)}`);
+  }
+});
+
+test("VALIDER sur une porte disparue ne clôt PAS : le mail n'est pas parti", () => {
+  // L'asymétrie est le cœur du correctif. Faire disparaître une validation non
+  // transmise ferait passer une candidature jamais envoyée pour envoyée.
+  const journal = [{ id: "v", decision: "valider", at: "x", n8nStatus: 404 }];
+  assert.equal(dejaClose(journal, "v"), false);
+});
+
+test("porteDisparue distingue « la porte n'existe plus » d'une panne", () => {
+  assert.equal(porteDisparue(404), true);
+  assert.equal(porteDisparue(410), true);
+  assert.equal(porteDisparue(502), false);
+  assert.equal(porteDisparue(200), false);
+  assert.equal(porteDisparue(null), false);
+  assert.equal(porteDisparue(undefined), false);
+});
+
+test("une fiche refusée sur un 404 disparaît de la liste « À valider »", () => {
+  // Le test de bout en bout du symptôme : c'est fichesEnAttenteDepuis qui
+  // alimente la page.
+  const fiches = [{ schema: "career-ops-inbox/v2", id: "offre-1", statut: "en_attente" }];
+  const journal = [{ id: "offre-1", decision: "refuser", raison: "salaire", at: "x", n8nStatus: 404 }];
+  assert.deepEqual(fichesEnAttenteDepuis(fiches, journal), []);
 });
 
 test("le journal survit à une ligne corrompue et à un fichier absent", () => {
