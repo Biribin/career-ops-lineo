@@ -6,7 +6,7 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 import dotenv from 'dotenv';
@@ -294,6 +294,43 @@ function checkFonts() {
   return { pass: true, label: 'Fonts directory ready' };
 }
 
+/**
+ * Warn when CAREER_OPS_REPORTS_DIR points somewhere other than `reports/`.
+ *
+ * Report bookkeeping has TWO consumers that must agree on one directory:
+ * reserve-report-num.mjs honors this override, while the report file itself is
+ * written by the agent to the RELATIVE `reports/{num}-…md` path that
+ * modes/oferta.md dictates. Nothing reconciles them, so an override silently
+ * splits reservations from reports.
+ *
+ * Seen in production 2026-08-14: the variable carried a trailing comma
+ * (`/app/data/reports,` — a typo when pasting env vars), so reservation sentinels
+ * piled up in a directory nobody read, while a report the tracker linked to was
+ * written to a `reports/` that no volume covered and vanished on the next deploy.
+ * The tracker row survived, pointing at a file that no longer existed. A warning
+ * here is the cheapest place to catch that class of drift.
+ */
+function checkReportsDirOverride() {
+  const override = process.env.CAREER_OPS_REPORTS_DIR?.trim();
+  if (!override) return { pass: true, label: 'Reports directory not overridden' };
+  // Compared as resolved paths so `./reports` or a trailing slash counts as a match;
+  // only a genuinely different target is worth a warning.
+  const attendu = resolve(join(projectRoot, 'reports'));
+  const actuel = resolve(override);
+  if (actuel === attendu) {
+    return { pass: true, label: 'CAREER_OPS_REPORTS_DIR matches reports/' };
+  }
+  return {
+    warn: true,
+    label: `CAREER_OPS_REPORTS_DIR points at ${actuel}, not ${attendu} — reserved numbers and written reports would land in different directories`,
+    fix: [
+      'Unset CAREER_OPS_REPORTS_DIR so both sides use reports/ (recommended)',
+      'Or point it exactly at the reports/ directory the evaluation writes to',
+      'Watch for a stray comma or quote: a typo here is silent, and costs the report the tracker links to',
+    ],
+  };
+}
+
 function checkAutoDir(name) {
   const dirPath = join(projectRoot, name);
   if (existsSync(dirPath)) {
@@ -414,6 +451,7 @@ async function main() {
     checkPipelineFile(),
     checkAutoDir('output'),
     checkAutoDir('reports'),
+    checkReportsDirOverride(),
     checkPlugins(projectRoot),
   ].filter(Boolean);
 
