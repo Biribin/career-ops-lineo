@@ -11,6 +11,7 @@ import { JobsProvider } from "@/components/jobs/job-store";
 import { PipelineProvider } from "@/components/pipeline/pipeline-provider";
 import { ApplyProvider } from "@/components/apply/apply-provider";
 import { ExploreProvider } from "@/components/explore/explore-provider";
+import { ADeposerProvider, BadgeADeposer } from "@/components/a-deposer/a-deposer-provider";
 import { FirstScoreView } from "@/components/explore/first-score-view";
 import { BetaBanner } from "@/components/beta/beta-banner";
 import { WorkerPills } from "@/components/jobs/worker-pills";
@@ -25,6 +26,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <PipelineProvider>
       <ApplyProvider>
       <ExploreProvider>
+      {/* Englobe les DEUX navs et le contenu : le badge est lu par la barre
+          latérale et la nav mobile, et remis à jour par la page /a-deposer. */}
+      <ADeposerProvider>
       <MobileNav />
       <div className="flex min-h-screen">
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
@@ -35,7 +39,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
           <nav className="flex flex-col gap-1">
-            {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
+            {NAV_ITEMS.map(({ href, label, icon: Icon, chip, compteur }) => {
               const active = isActivePath(href, pathname);
               return (
                 <Link
@@ -55,6 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       {chip}
                     </span>
                   )}
+                  {compteur === "a-deposer" && <BadgeADeposer />}
                 </Link>
               );
             })}
@@ -75,6 +80,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <FirstScoreView />
         <BetaBanner />
       </div>
+      </ADeposerProvider>
       </ExploreProvider>
       </ApplyProvider>
       </PipelineProvider>

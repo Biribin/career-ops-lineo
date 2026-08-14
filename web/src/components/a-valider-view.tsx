@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Download, ExternalLink, Eye, FileText, GraduationCap, Loader2, Mail, PenLine, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
+import { useADeposer } from "@/components/a-deposer/a-deposer-provider";
 import { cn } from "@/lib/cn";
 import { formationsPourFiche } from "@/lib/formations.mjs";
 
@@ -167,6 +168,7 @@ export function AValiderView() {
 }
 
 function Carte({ fiche, onDecide }: { fiche: Fiche; onDecide: () => void }) {
+  const { rafraichir } = useADeposer();
   const [ouvert, setOuvert] = useState<Decision | null>(null);
   const [texte, setTexte] = useState("");
   const [envoi, setEnvoi] = useState(false);
@@ -229,6 +231,10 @@ function Carte({ fiche, onDecide }: { fiche: Fiche; onDecide: () => void }) {
       );
       setOuvert(null);
       setTexte("");
+      // Valider une candidature SANS courriel de recruteur la fait entrer dans
+      // « À déposer » : le badge doit apparaître tout de suite, c'est le seul
+      // rappel qu'un geste reste à faire.
+      if (d === "valider" && sansCourriel) rafraichir(true);
       // Laisse le message lisible avant de recharger la liste.
       setTimeout(onDecide, 1500);
     } catch (e) {

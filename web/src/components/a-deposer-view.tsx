@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
+import { useADeposer } from "@/components/a-deposer/a-deposer-provider";
 import { cn } from "@/lib/cn";
 
 // La file des candidatures validées que n8n n'a pas pu envoyer : pas d'adresse
@@ -192,6 +193,10 @@ type Resultat = {
 };
 
 function Carte({ fiche, onEnregistre }: { fiche: Fiche; onEnregistre: () => void }) {
+  // Le badge de la nav doit tomber en même temps que la carte, sinon il
+  // contredirait la page qui vient de l'écrire. `true` = on court-circuite la
+  // TTL du compteur.
+  const { rafraichir } = useADeposer();
   const [envoi, setEnvoi] = useState<"depose" | "abandon" | null>(null);
   const [abandon, setAbandon] = useState(false);
   const [raison, setRaison] = useState("");
@@ -252,6 +257,7 @@ function Carte({ fiche, onEnregistre }: { fiche: Fiche; onEnregistre: () => void
       }
       setAbandon(false);
       setRaison("");
+      rafraichir(true);
       // Laisse le message lisible avant que la carte disparaisse de la file.
       setTimeout(onEnregistre, 2200);
     } catch (e) {

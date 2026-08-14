@@ -8,6 +8,9 @@ export type NavItem = {
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   chip?: string;
+  /** Pastille de comptage vivant, rendue par les DEUX navs depuis le même
+   *  fournisseur — un libellé statique (`chip`) ne pourrait pas dire combien. */
+  compteur?: "a-deposer";
 };
 
 // Les `href` sont des routes (noms de fichiers) — jamais traduits. Seuls les
@@ -20,7 +23,7 @@ export const NAV_ITEMS: NavItem[] = [
   // n8n n'a pu envoyer que le dossier à Linéo, et c'est là qu'un dépôt manuel
   // s'enregistre. Sans cette destination, la candidature n'entre jamais dans le
   // tracker — donc ni dans « Envoyées », ni dans les relances.
-  { href: "/a-deposer", label: "À déposer", icon: PackageCheck },
+  { href: "/a-deposer", label: "À déposer", icon: PackageCheck, compteur: "a-deposer" },
   { href: "/pipeline", label: "Candidatures", icon: ListChecks },
   { href: "/reponses", label: "Réponses n8n", icon: MessageSquare },
   // Deux destinations, deux questions : /relances ne montre que ce qui est dû
