@@ -149,8 +149,18 @@ export function estDecision(v) {
   return typeof v === "string" && DECISIONS.includes(v);
 }
 
-/** Un POST qui a réellement rouvert la porte chez n8n. */
-function transmise(d) {
+/**
+ * Un POST qui a réellement rouvert la porte chez n8n.
+ *
+ * Exporté pour la file « À déposer » (a-deposer.mjs), qui doit distinguer une
+ * validation TRANSMISE — n8n est reparti, le dossier à déposer a été préparé —
+ * d'une validation seulement enregistrée au journal, qui laisse l'exécution
+ * parquée et n'a donc rien préparé du tout. Une seule définition, sinon les deux
+ * files ne parleraient pas du même « validé ».
+ *
+ * @param {Journal} d
+ */
+export function transmise(d) {
   return d.n8nStatus != null && d.n8nStatus < 400;
 }
 

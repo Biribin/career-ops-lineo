@@ -1,4 +1,4 @@
-import { LayoutDashboard, Compass, History, ListChecks, Send, Radar, BarChart3, PieChart, FileText, Settings, ShieldCheck, MessageSquare } from "lucide-react";
+import { LayoutDashboard, Compass, History, ListChecks, PackageCheck, Send, Radar, BarChart3, PieChart, FileText, Settings, ShieldCheck, MessageSquare } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 
 // Single source of truth for the app's primary destinations — shared by the
@@ -16,6 +16,11 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Aujourd'hui", icon: LayoutDashboard },
   { href: "/explore", label: "Explorer", icon: Compass, chip: "Nouveau" },
   { href: "/a-valider", label: "À valider", icon: ShieldCheck },
+  // Suite immédiate de « À valider » pour les annonces sans adresse de recruteur :
+  // n8n n'a pu envoyer que le dossier à Linéo, et c'est là qu'un dépôt manuel
+  // s'enregistre. Sans cette destination, la candidature n'entre jamais dans le
+  // tracker — donc ni dans « Envoyées », ni dans les relances.
+  { href: "/a-deposer", label: "À déposer", icon: PackageCheck },
   { href: "/pipeline", label: "Candidatures", icon: ListChecks },
   { href: "/reponses", label: "Réponses n8n", icon: MessageSquare },
   // Deux destinations, deux questions : /relances ne montre que ce qui est dû
