@@ -29,6 +29,8 @@
  *   node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
  *   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
  *   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
+ *   node scan.mjs --only boards    # scan ONLY the job_boards section of portals.yml
+ *   node scan.mjs --only companies # scan ONLY tracked_companies
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
@@ -1969,6 +1971,29 @@ async function main() {
   // --include-blacklisted: bypass the data/blacklist.md filter for auditing.
   // Matching postings flow through annotated instead of being counted out.
   const includeBlacklisted = args.includes('--include-blacklisted');
+  // --only boards|companies: restrict the sweep to one section of portals.yml.
+  //
+  // Why this exists: `job_boards` was reachable ONLY by a full `node scan.mjs`,
+  // which also walks every tracked_companies entry (116 in a real config, several
+  // minutes). An automated caller that just wants the boards — /api/scan, which a
+  // cron hits under a 300 s ceiling — had no way to ask for them, so the boards
+  // were configured and never swept.
+  //
+  // A typo EXITS instead of falling back to "all": silently scanning everything
+  // when the caller asked for a subset is the failure mode this flag exists to
+  // remove, and it would show up as a timeout, not as a wrong answer.
+  // The absence of the flag and a PRESENT-BUT-EMPTY value are handled apart on
+  // purpose. `node scan.mjs --only` (flag last, no value) read as an empty
+  // string, which passed for "no restriction" and swept everything — the very
+  // silent fallback this guard exists to remove. Caught by
+  // tests/scan-only-section.test.mjs before it ever ran unattended.
+  const onlyFlag = args.indexOf('--only');
+  const onlyValue = onlyFlag !== -1 ? String(args[onlyFlag + 1] ?? '').trim().toLowerCase() : '';
+  if (onlyFlag !== -1 && !['all', 'boards', 'companies'].includes(onlyValue)) {
+    console.error(`❌ --only accepts "boards", "companies" or "all" — got ${JSON.stringify(args[onlyFlag + 1] ?? '')}`);
+    process.exit(1);
+  }
+  const onlySection = onlyFlag === -1 ? '' : onlyValue;
   const companyFlag = args.indexOf('--company');
   const filterCompany = companyFlag !== -1 ? args[companyFlag + 1]?.toLowerCase() : null;
   // --posted-after / --posted-before <YYYY-MM-DD>: absolute-date bounds on the
@@ -2115,8 +2140,8 @@ async function main() {
     }
   }
 
-  resolveEntries(companies);
-  resolveEntries(boards, { isBoard: true });
+  if (onlySection !== 'boards') resolveEntries(companies);
+  if (onlySection !== 'companies') resolveEntries(boards, { isBoard: true });
 
   const localParserCount = targets.filter(t => t._provider.id === 'local-parser').length;
   const companyCount = targets.length - boardCount;
@@ -2124,7 +2149,10 @@ async function main() {
   if (boardCount > 0) parts.push(`${boardCount} job boards`);
   parts.push(`${localParserCount} local parser`);
   parts.push(`${skippedCount} skipped — no provider matched`);
-  console.log(`Scanning ${parts.join('; ')} via providers`);
+  // The restriction is stated, because otherwise "0 companies" reads as a broken
+  // config rather than as the subset the caller asked for.
+  const scope = onlySection && onlySection !== 'all' ? ` (--only ${onlySection})` : '';
+  console.log(`Scanning ${parts.join('; ')} via providers${scope}`);
   if (dryRun) console.log('(dry run — no files will be written)\n');
 
   // 3.5. Load the user's do-not-apply list (#1742). Opt-in: absent file =
