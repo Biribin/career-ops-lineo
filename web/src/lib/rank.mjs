@@ -22,6 +22,8 @@
 // « oublie » silencieusement la moitié du lot. On borne donc explicitement, et on
 // DIT ce qu'on a écarté.
 
+import { cleJob } from "./cle-job.mjs";
+
 /**
  * Le nombre d'offres soumises au modèle en un seul appel.
  *
@@ -201,17 +203,29 @@ export function clesNormalisees(...listes) {
  * déjà tranchées. Les écarter ICI, avant le plafond ET avant le modèle, est ce
  * qui rend chaque tournée réellement neuve.
  *
+ * `clesConnues` porte les IDENTITÉS DE POSTE déjà au journal (cf. cle-job.mjs).
+ * C'est le même filtre que `dejaVus`, au niveau du poste et non de
+ * l'identifiant : France Travail republie la même annonce sous plusieurs jobId,
+ * si bien qu'une offre déjà tranchée revenait malgré `dejaVus`. Mesuré sur la
+ * tournée du 2026-08-14 : 7 postes de la veille de retour sous un identifiant
+ * neuf, et 35 identifiants en trop dans la tournée elle-même. Les jumeaux du
+ * MÊME lot sont fondus ici aussi — chacun occupait sinon une des 150 places et
+ * se faisait rédiger son propre whyMatch.
+ *
  * @param {unknown[]} offresBrutes
- * @param {{ maxOffres?: number, dejaVus?: Set<string> | string[], motsCles?: string[] }} [opts]
+ * @param {{ maxOffres?: number, dejaVus?: Set<string> | string[], clesConnues?: Set<string> | string[], motsCles?: string[] }} [opts]
  */
-export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus, motsCles = [] } = {}) {
+export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus, clesConnues, motsCles = [] } = {}) {
   const connus = dejaVus instanceof Set ? dejaVus : new Set(Array.isArray(dejaVus) ? dejaVus.map(txt) : []);
+  const clesVues = clesConnues instanceof Set ? clesConnues : new Set(Array.isArray(clesConnues) ? clesConnues.map(txt) : []);
   const cles = clesNormalisees(motsCles);
   const vues = new Set();
+  const clesDuLot = new Set();
   /** @type {Array<ReturnType<typeof normaliseOffre> & {_pertinence: number}>} */
   const offres = [];
   let sansId = 0;
   let dejaVues = 0;
+  let jumeaux = 0;
   let alternances = 0;
 
   for (const brut of Array.isArray(offresBrutes) ? offresBrutes : []) {
@@ -231,9 +245,29 @@ export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus, mots
     // pertinence. La faire appliquer par le modèle coûtait une place de lot et
     // des tokens de sortie pour une offre dont la réponse était connue d'avance.
     // Il y en avait 88 sur les 1 161 de la tournée du 2026-08-10.
+    //
+    // AVANT le filtre anti-jumeaux, volontairement : une règle absolue passe
+    // devant une déduplication, et compter une alternance comme un « jumeau »
+    // effacerait la raison réelle de son écartement.
     if (estAlternance(brut, o.title)) {
       alternances += 1;
       continue;
+    }
+    // Le même poste sous un autre identifiant : déjà tranché (clesVues) ou déjà
+    // présent dans ce lot-ci (clesDuLot). Une offre sans identité de poste —
+    // employeur absent chez France Travail, 332 cas sur 1 150 le 2026-08-14 —
+    // n'est jamais fusionnée : on ne masque que ce qu'on sait reconnaître.
+    const cleDuPoste = cleJob(o);
+    if (cleDuPoste) {
+      if (clesVues.has(cleDuPoste)) {
+        dejaVues += 1;
+        continue;
+      }
+      if (clesDuLot.has(cleDuPoste)) {
+        jumeaux += 1;
+        continue;
+      }
+      clesDuLot.add(cleDuPoste);
     }
     offres.push({ ...o, _pertinence: scorePertinence(o, cles) });
   }
@@ -251,9 +285,18 @@ export function prepareLot(offresBrutes, { maxOffres = MAX_OFFRES, dejaVus, mots
     // savoir si une tournée maigre vient de requêtes redondantes ou d'un
     // gisement épuisé.
     doublons:
-      (Array.isArray(offresBrutes) ? offresBrutes.length : 0) - offres.length - sansId - dejaVues - alternances,
+      (Array.isArray(offresBrutes) ? offresBrutes.length : 0) -
+      offres.length -
+      sansId -
+      dejaVues -
+      jumeaux -
+      alternances,
     sansId,
     dejaVues,
+    // Comptés à part des `doublons` (même URL, même identifiant) : un jumeau est
+    // la même annonce sous un AUTRE identifiant. Mélanger les deux effacerait la
+    // seule mesure qui dit si ce filtre sert encore à quelque chose.
+    jumeaux,
     alternances,
     tronquees: offres.length - gardees.length,
     // Combien des offres retenues portent un mot-clé dans leur intitulé. C'est la
@@ -454,6 +497,13 @@ export function parseRank(brut, { offresConnues = [] } = {}) {
     const note = Number(j.score);
     jobs.push({
       jobId,
+      // L'identité du poste, calculée sur l'offre D'ORIGINE et transportée
+      // jusqu'au journal. Elle n'est PAS recalculée en aval sur les champs
+      // rendus par le modèle : celui-ci reformate parfois l'intitulé, et la clé
+      // stockée ne correspondrait plus à celle que la tournée suivante calcule
+      // sur les données brutes de France Travail — le filtre anti-jumeaux
+      // raterait précisément les offres pour lesquelles il existe.
+      ...(source && cleJob(source) ? { cle: cleJob(source) } : {}),
       // On refait confiance à l'offre d'origine pour les faits, et au modèle
       // seulement pour le jugement (whyMatch, score).
       title: txt(j.title) || source?.title || "",
