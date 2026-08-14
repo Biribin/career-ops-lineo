@@ -50,21 +50,31 @@ const PROVIDERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'provider
 // How to turn a slug into a probe URL, and where the job list lives in the
 // response, for each supported ATS. Greenhouse/Ashby wrap jobs in `{ jobs }`;
 // Lever returns a bare array. `includeCompensation` mirrors the ashby provider.
+//
+// `careersUrl` est la forme PUBLIQUE de l'URL, celle qui s'écrit dans
+// portals.yml. Elle vit ici, à côté de l'URL de sondage, parce que c'est la même
+// connaissance : « cet ATS, ce slug, quelle adresse ». fix-slugs.mjs la lit
+// depuis cette table au lieu d'en tenir une copie — deux copies de cette
+// correspondance ont déjà divergé une fois (une suggestion SmartRecruiters
+// s'écrivait en URL Lever, cf. tests/fix-slugs-resolved-urls.test.mjs).
 export const ATS = {
   greenhouse: {
     probeUrl: (slug) =>
       `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`,
+    careersUrl: (slug) => `https://job-boards.greenhouse.io/${slug}`,
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
   },
   ashby: {
     probeUrl: (slug) =>
       `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`,
+    careersUrl: (slug) => `https://jobs.ashbyhq.com/${slug}`,
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
   },
   lever: {
     // EU boards (jobs.eu.lever.co) resolve to api.eu.lever.co, mirroring the
     // provider's resolveApiUrl; the default is the base instance.
     probeUrl: (slug, { eu = false } = {}) => `https://api.${eu ? 'eu.' : ''}lever.co/v0/postings/${slug}`,
+    careersUrl: (slug, { eu = false } = {}) => `https://jobs.${eu ? 'eu.' : ''}lever.co/${slug}`,
     jobCount: (json) => (Array.isArray(json) ? json.length : null),
   },
   // SmartRecruiters: public postings API, a plain GET keyed on the company slug —
@@ -95,6 +105,7 @@ export const ATS = {
   // probeProvesTenant(); do not re-inline it in a third caller.
   smartrecruiters: {
     probeUrl: (slug) => `https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=1`,
+    careersUrl: (slug) => `https://careers.smartrecruiters.com/${slug}`,
     jobCount: (json) =>
       Array.isArray(json?.content)
         ? (Number.isFinite(json?.totalFound) ? json.totalFound : json.content.length)
@@ -121,6 +132,7 @@ export const ATS = {
   // WelcomeKit pour n'importe quel nom d'entreprise au monde.
   welcomekit: {
     probeUrl: (slug) => `https://${slug}.welcomekit.co/`,
+    careersUrl: (slug) => `https://${slug}.welcomekit.co/`,
     transport: 'text',
     jobCount: (html) =>
       typeof html === 'string' ? parseWelcomekitBoard(html, 'https://board.welcomekit.co/').length : null,
@@ -648,8 +660,16 @@ export async function runAdd(name, { fetchJson = defaultFetchJson, fetchText = n
       );
     }
   } else {
+    // L'URL RÉSOLUE, pas seulement l'ats et le slug. Le lecteur de cette sortie
+    // est en général un agent chargé d'écrire `careers_url` dans portals.yml :
+    // « welcomekit → slug 'nutripure' » l'obligerait à deviner la forme de l'URL,
+    // et `https://welcomekit.co/nutripure` (au lieu de
+    // `https://nutripure.welcomekit.co/`) est un slug mort écrit en silence, soit
+    // exactement ce que ce script existe pour empêcher. Le sondage connaît l'URL :
+    // il la donne.
     log(
-      `\nSuggested: careers_url for ${best.ats}${best.eu ? ' (EU instance)' : ''} → slug '${best.slug}'`,
+      `\nSuggested: careers_url for ${best.ats}${best.eu ? ' (EU instance)' : ''} → slug '${best.slug}'` +
+        `\n  careers_url: ${ATS[best.ats]?.careersUrl?.(best.slug, { eu: best.eu }) ?? best.url}`,
     );
     if (best.status === 'empty') {
       log('  ⚠️  Board is live but empty — open it by hand before adding the entry.');

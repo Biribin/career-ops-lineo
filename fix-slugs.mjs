@@ -35,7 +35,7 @@ import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 
 import { fetchText } from './providers/_http.mjs';
-import { verifyPortalsFile } from './verify-portals.mjs';
+import { ATS, verifyPortalsFile } from './verify-portals.mjs';
 
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
 
@@ -80,42 +80,20 @@ export function splitCompanyBlocks(text) {
  *   writer cannot express — the caller must then leave the entry alone.
  */
 export function resolvedUrls({ ats, slug, eu }) {
-  if (ats === 'greenhouse') {
-    return {
-      careersUrl: `https://job-boards.greenhouse.io/${slug}`,
-      api: `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`,
-    };
-  }
-  if (ats === 'ashby') {
-    return { careersUrl: `https://jobs.ashbyhq.com/${slug}`, api: null };
-  }
-  if (ats === 'lever') {
-    // `eu` distinguishes Lever's EU data-residency instance, which shares the
-    // 'lever' key. Writing the base host for an EU-only tenant yields a URL that
-    // 404s on every scan — the exact failure this script exists to repair.
-    return {
-      careersUrl: `https://jobs.${eu ? 'eu.' : ''}lever.co/${slug}`,
-      api: null,
-    };
-  }
-  if (ats === 'welcomekit') {
-    // Le board EST la page carrières : `<slug>.welcomekit.co`. Comme
-    // SmartRecruiters, cette forme est volontairement hors du tier 1 de
-    // verify-portals et route l'entrée vers providers/welcomekit.mjs.
-    return { careersUrl: `https://${slug}.welcomekit.co/`, api: null };
-  }
-  if (ats === 'smartrecruiters') {
-    // careers.smartrecruiters.com is DELIBERATELY absent from verify-portals'
-    // tier-1 ATS_URL_PATTERNS: this URL shape routes the entry to
-    // providers/smartrecruiters.mjs, which is the code the real scanner runs.
-    return { careersUrl: `https://careers.smartrecruiters.com/${slug}`, api: null };
-  }
-  // Unknown ATS: refuse rather than guess. This used to fall through to the
-  // Lever shape, so once SmartRecruiters joined verify-portals' probe table a
-  // smartrecruiters suggestion was written as `https://jobs.lever.co/<slug>` —
-  // a dead URL, under a note claiming a migration to SmartRecruiters, i.e. the
-  // silent-404 entry this whole tool exists to prevent.
-  return null;
+  // La forme de l'URL publique vient de la table ATS de verify-portals, qui la
+  // porte à côté de l'URL de sondage. En garder une copie ici est ce qui a
+  // silencieusement écrit une suggestion SmartRecruiters en URL Lever le temps
+  // d'une régression : deux copies de la même correspondance dérivent.
+  const careersUrl = ATS[ats]?.careersUrl?.(slug, { eu });
+  // ATS inconnu de la table : on refuse plutôt que de deviner. L'appelant laisse
+  // alors l'entrée intacte et le signale, au lieu d'écrire une URL morte sous une
+  // note annonçant une migration réussie.
+  if (!careersUrl) return null;
+  // `api:` n'existe que là où le scanner gagne à pointer l'endpoint résolu.
+  // Ailleurs il doit être ABSENT (et supprimé s'il traînait) : un `api:`
+  // greenhouse laissé sur une entrée migrée reste appelé à chaque scan.
+  const api = ats === 'greenhouse' ? `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs` : null;
+  return { careersUrl, api };
 }
 
 /**
