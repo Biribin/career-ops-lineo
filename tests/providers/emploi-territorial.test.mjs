@@ -34,7 +34,7 @@ const FEED = (items) => `<?xml version="1.0"?><rss version="2.0"><channel><title
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/emploi-territorial.mjs')).href);
   const et = mod.default;
-  const { parseEtFeed, categoryValue, descField } = mod;
+  const { parseEtFeed, categoryValue, descField, departementDepuisId, composeLieu } = mod;
 
   if (et.id === 'emploi-territorial') pass('emploi-territorial.id is "emploi-territorial"');
   else fail(`id is ${JSON.stringify(et.id)}`);
@@ -50,13 +50,55 @@ try {
     job &&
     job.title === 'PUÉRICULTEUR VOLANT DÉPARTEMENTAL H/F' &&
     job.company === 'CONSEIL DEPARTEMENTAL DE LA VENDEE' &&
-    job.location === 'La Roche-sur-Yon' &&
+    job.location === 'La Roche-sur-Yon (85)' &&
     job.postedAt === Date.parse('Fri, 14 Aug 2026 09:15:56 +0000')
   ) {
-    pass('parseEtFeed maps title/employer/location/pubDate from the structured categories');
+    pass('parseEtFeed maps title/employer/location/pubDate, department included');
   } else {
     fail(`parseEtFeed job = ${JSON.stringify(job)}`);
   }
+
+  // -- The department, and why the location is unusable without it ------------
+  // The feed names the city and nothing else. `location_filter.allow` is a
+  // keyword whitelist, so "Melun" matches nothing a user can reasonably list:
+  // measured 2026-08-14, 23 postings a day passed the title filter and were then
+  // dropped on location, with no keyword able to rescue them.
+  if (departementDepuisId('https://www.emploi-territorial.fr/:O085260814000428') === '85') {
+    pass('departementDepuisId reads the department from the guid');
+  } else {
+    fail(`departementDepuisId(guid) = ${JSON.stringify(departementDepuisId('https://www.emploi-territorial.fr/:O085260814000428'))}`);
+  }
+  if (departementDepuisId('https://www.emploi-territorial.fr/offre/o077260814000400-x') === '77') {
+    pass('departementDepuisId also reads it from the lowercased link');
+  } else {
+    fail('departementDepuisId failed on the link form');
+  }
+  // THE bug this function was written with and caught on the live feed: stripping
+  // every leading zero turns Ariège ("009") into "9", which no French code ever
+  // is and no whitelist entry matches. 8 of 100 items are 002/006/009.
+  const petits = [['x:O009260814000746', '09'], ['x:O006260814000625', '06'], ['x:O002260814000600', '02']];
+  const rates = petits.filter(([id, attendu]) => departementDepuisId(id) !== attendu);
+  if (rates.length === 0) pass('a single-digit department keeps its padding zero (09, 06, 02) — not "9", "6", "2"');
+  else fail(`single-digit departments = ${JSON.stringify(rates.map(([id]) => [id, departementDepuisId(id)]))}`);
+  if (departementDepuisId('x:O971260814000001') === '971') pass('an overseas department keeps its three digits');
+  else fail('overseas department mangled');
+  const refus = ['x:O000260814000001', 'x:O123260814000001', 'pas-un-id', '', null, undefined];
+  const acceptes = refus.filter((v) => departementDepuisId(v) !== '');
+  if (acceptes.length === 0) pass('departementDepuisId returns "" rather than guessing on 000, a non-padded prefix or garbage');
+  else fail(`departementDepuisId accepted: ${JSON.stringify(acceptes)}`);
+
+  if (composeLieu('Melun', '77') === 'Melun (77)' && composeLieu('Melun', '') === 'Melun' && composeLieu('', '77') === '(77)' && composeLieu('', '') === '') {
+    pass('composeLieu yields "Ville (DD)" and degrades cleanly when either half is missing');
+  } else {
+    fail(`composeLieu = ${JSON.stringify([composeLieu('Melun', '77'), composeLieu('Melun', ''), composeLieu('', '77'), composeLieu('', '')])}`);
+  }
+
+  // An item whose identifier says nothing must keep its bare city, not lose it.
+  const sansId = ITEM.replace(/<guid[^>]*>[^<]*<\/guid>/, '<guid>https://www.emploi-territorial.fr/:sans-id</guid>')
+    .replace('offre/o085260814000428-puEriculteur-volant', 'offre/sans-id-puericulteur');
+  const [nu] = parseEtFeed(FEED(sansId));
+  if (nu?.location === 'La Roche-sur-Yon') pass('an unreadable identifier leaves the city alone instead of dropping the posting');
+  else fail(`item without a usable id = ${JSON.stringify(nu?.location)}`);
 
   // The dedup key is the URL, so the feed's analytics parameter must go: the same
   // posting reached from the feed and from a page scan has to produce one string.
@@ -72,7 +114,7 @@ try {
   else fail(`parseEtFeed invented a description: ${JSON.stringify(job.description)}`);
 
   const [fallback] = parseEtFeed(FEED(ITEM_DIVS_ONLY));
-  if (fallback?.company === 'CONSEIL DEPARTEMENTAL DE LA VENDEE' && fallback?.location === 'La Roche-sur-Yon') {
+  if (fallback?.company === 'CONSEIL DEPARTEMENTAL DE LA VENDEE' && fallback?.location === 'La Roche-sur-Yon (85)') {
     pass('parseEtFeed falls back to the description divs when the categories are absent');
   } else {
     fail(`parseEtFeed fallback = ${JSON.stringify(fallback)}`);

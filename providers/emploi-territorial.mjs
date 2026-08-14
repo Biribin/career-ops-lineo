@@ -101,6 +101,58 @@ export function descField(item, name) {
   return clean(decodeXmlEntities(m[1]).replace(/<[^>]*>/g, ' ').replace(/^[^:]*:\s*/, ''));
 }
 
+/**
+ * The French department code, read from the posting's own identifier.
+ *
+ * WHY THIS EXISTS. The feed names the city and nothing else — "Melun", "Gramat",
+ * "La Roche-sur-Yon". scan.mjs's `location_filter.allow` is a keyword whitelist,
+ * so a bare city name matches nothing a user can reasonably list: measured
+ * 2026-08-14, 23 postings a day passed the title filter and were then dropped on
+ * location, with no keyword list able to rescue them.
+ *
+ * The identifier carries the answer. Every posting is `O<DDD><date><seq>` (in the
+ * guid, and lowercased in the link), where `<DDD>` is the zero-padded department:
+ * verified on 100/100 items of a live feed — 41 distinct departments, every one
+ * `0XX`, and the cross-checks are exact (072 → Le Mans/Sarthe, 038 →
+ * Bouvesse-Quirieu/Isère, 093 → Bobigny/Seine-Saint-Denis).
+ *
+ * Metropolitan codes drop ONLY the padding zero ("085" → "85", "009" → "09").
+ * Stripping every leading zero would be the bug this comment exists to prevent:
+ * it turns Ariège ("009") into "9", which is not how a French code is ever
+ * written and matches no whitelist entry. Caught on the live feed — 8 of 100
+ * items are 002/006/009 (Aisne, Alpes-Maritimes, Ariège).
+ *
+ * Overseas codes (971-976) keep their three digits. Corsica, if it ever appears
+ * as "020", yields "20" — the informal form, NOT the official 2A/2B, so a
+ * whitelist wanting Corsica needs "20" too.
+ *
+ * Returns '' rather than a guess when the identifier is missing or malformed.
+ *
+ * @param {string} identifiant  guid or link of the item
+ * @returns {string}
+ */
+export function departementDepuisId(identifiant) {
+  const m = String(identifiant ?? '').match(/[:/]o(\d{3})\d{6,}/i);
+  if (!m) return '';
+  const brut = m[1];
+  if (brut.startsWith('9')) return brut; // 971-976: outre-mer, trois chiffres
+  // Everything metropolitan is zero-padded to three digits, so the department is
+  // the last two — never a re-derived number.
+  if (!brut.startsWith('0')) return '';
+  const court = brut.slice(1);
+  return court === '00' ? '' : court;
+}
+
+/** `Ville (DD)` — the shape the other French providers emit, so one
+ *  location_filter covers them all. Either half may be missing. */
+export function composeLieu(ville, departement) {
+  const v = clean(ville);
+  const d = clean(departement);
+  if (v && d) return `${v} (${d})`;
+  if (v) return v;
+  return d ? `(${d})` : '';
+}
+
 // NaN-safe Date.parse — `|| undefined` would also discard a valid epoch 0.
 function toEpochMs(value) {
   if (!value) return undefined;
@@ -153,6 +205,11 @@ export function parseEtFeed(xml, defaultCompany = 'Emploi Territorial') {
     const title = clean(tagText(item, 'title'));
     if (!title) continue;
     const postedAt = toEpochMs(tagText(item, 'pubDate'));
+    // The department comes from the identifier, and the guid is tried first: it
+    // carries the id in its canonical uppercase form, while the link only holds a
+    // lowercased copy inside a slug.
+    const departement =
+      departementDepuisId(tagText(item, 'guid')) || departementDepuisId(tagText(item, 'link'));
     /** @type {any} */
     const job = {
       title,
@@ -160,7 +217,9 @@ export function parseEtFeed(xml, defaultCompany = 'Emploi Territorial') {
       // The hiring authority, not the board: `collectivite` is the structured
       // field, `employeur` the presentational one.
       company: categoryValue(item, 'collectivite') || descField(item, 'employeur') || fallback,
-      location: categoryValue(item, 'secteurgeo') || descField(item, 'lieutravail'),
+      // City alone matched no reasonable whitelist keyword — see
+      // departementDepuisId for the 23 postings a day that cost.
+      location: composeLieu(categoryValue(item, 'secteurgeo') || descField(item, 'lieutravail'), departement),
     };
     if (postedAt !== undefined) job.postedAt = postedAt;
     jobs.push(job);

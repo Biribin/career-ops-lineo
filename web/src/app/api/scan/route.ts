@@ -24,13 +24,16 @@ export const dynamic = "force-dynamic";
 // POST /api/tailor le sont) : la forme peut encore bouger, et la session n8n ne
 // doit pas s'y accrocher sans se resynchroniser.
 //
-// DEUX BALAYAGES, deux gisements. `scan-ats-full.mjs` parcourt les ANNUAIRES
+// TROIS BALAYAGES, trois gisements. `scan-ats-full.mjs` parcourt les ANNUAIRES
 // d'ATS (découverte inversée : des entreprises qu'on ne suit pas encore) ;
 // `scan.mjs --only boards` interroge les BOARDS déclarés dans portals.yml (APEC,
-// Choisir le Service Public, Emploi Territorial, HelloWork, SolidJobs…). Le
-// second manquait, et son absence était totale : un board activé n'était jamais
-// balayé par une tournée automatique, puisque rien d'autre que le CLI ne lit
-// `job_boards`. Coupable avec `boards=0`.
+// Choisir le Service Public, Emploi Territorial, HelloWork, SolidJobs…) ;
+// `scan.mjs --only companies` interroge les ENTREPRISES SUIVIES.
+//
+// Les deux derniers manquaient, et leur absence était totale : `scan-ats-full.mjs`
+// ne lit ni `job_boards` ni `tracked_companies` (zéro occurrence), donc une entrée
+// activée n'était jamais balayée par une tournée automatique — seulement par un
+// `node scan.mjs` lancé à la main. Coupables avec `boards=0` et `companies=0`.
 //
 // GRATUIT, zéro token. Les deux scanners ne font que du HTTP et du JSON ; le
 // classement est déterministe (@/lib/scan-rank.mjs). L'évaluation par LLM — la
@@ -46,7 +49,8 @@ export const dynamic = "force-dynamic";
 // Paramètres : `since` (jours, 1-60, défaut 7), `limit` (entreprises par ATS,
 // 50-500, défaut 150), `ats` (sous-ensemble), `top` (offres rendues, défaut 10),
 // `dry=1` (aucune écriture), `rescan=0` (ne relance rien, classe pipeline.md tel
-// quel — instantané et sans réseau), `boards=0` (saute les boards de portals.yml).
+// quel — instantané et sans réseau), `boards=0` et `companies=0` (sautent chacun
+// un des deux balayages de portals.yml).
 //
 // Le plafond `limit` n'est pas cosmétique : sans `--limit`, le scanner balaie TOUS
 // les annuaires (des heures). Le défaut de l'Explorer est repris tel quel pour que
@@ -140,11 +144,17 @@ function dernierRun(depuis: number): LigneRun | null {
 }
 
 /**
- * Lance `scan.mjs --only boards`. Les nouvelles offres atterrissent dans
- * `data/pipeline.md` par l'écrivain sanctionné du cœur (sous `pipeline-lock`),
- * exactement comme au terminal — cette route n'écrit rien elle-même.
+ * Lance `scan.mjs --only <section>` pour UNE des deux sections de portals.yml.
+ * Les nouvelles offres atterrissent dans `data/pipeline.md` par l'écrivain
+ * sanctionné du cœur (sous `pipeline-lock`), exactement comme au terminal —
+ * cette route n'écrit rien elle-même.
+ *
+ * Une fonction pour les deux sections, et deux appels séquentiels plutôt qu'un
+ * `scan.mjs` complet : les compteurs restent séparés, donc on sait lequel des
+ * deux gisements rapporte, et un timeout sur l'un n'emporte pas l'autre.
  */
-async function lancerScanBoards(
+async function lancerScanSection(
+  section: "boards" | "companies",
   { dry, timeoutMs }: { dry: boolean; timeoutMs: number },
 ): Promise<{ run: LigneRun | null; error: string | null; lance: boolean }> {
   const script = rootScript("scan");
@@ -152,10 +162,11 @@ async function lancerScanBoards(
     return { run: null, error: "Le scanner scan.mjs est absent de cette installation.", lance: false };
   }
   const depuis = Date.now();
+  const quoi = section === "boards" ? "boards" : "entreprises suivies";
   return new Promise((resolve) => {
     execFile(
       "node",
-      [script, "--only", "boards", "--quiet", ...(dry ? ["--dry-run"] : [])],
+      [script, "--only", section, "--quiet", ...(dry ? ["--dry-run"] : [])],
       { cwd: careerOpsRoot(), timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 },
       (err, _stdout, stderr) => {
         // Un `--dry-run` ne persiste RIEN par construction : ne pas aller chercher
@@ -166,7 +177,7 @@ async function lancerScanBoards(
         resolve({
           run,
           error: /timed out|ETIMEDOUT/i.test(String(err.message))
-            ? "Le balayage des boards a dépassé le temps imparti — réduis `pages` sur les entrées lentes de portals.yml."
+            ? `Le balayage des ${quoi} a dépassé le temps imparti — réduis le nombre d'entrées actives dans portals.yml.`
             : fin || String(err.message),
           lance: true,
         });
@@ -193,29 +204,46 @@ export async function GET(req: Request) {
   const dry = sp.get("dry") === "1";
   const rescan = sp.get("rescan") !== "0";
 
-  // `boards=0` coupe le balayage des boards de portals.yml. Activé par défaut :
-  // un board configuré et jamais balayé est le défaut qu'on vient de corriger,
-  // pas une option à réactiver.
+  // `boards=0` / `companies=0` coupent les balayages de portals.yml. Activés par
+  // défaut tous les deux : une entrée configurée et jamais balayée est le défaut
+  // qu'on corrige ici, pas une option à réactiver.
   const avecBoards = sp.get("boards") !== "0";
+  const avecEntreprises = sp.get("companies") !== "0";
 
   let charge: ChargeScanner | null = null;
   let error: string | null = null;
-  let boards: Awaited<ReturnType<typeof lancerScanBoards>> | null = null;
+  let boards: Awaited<ReturnType<typeof lancerScanSection>> | null = null;
+  let entreprises: Awaited<ReturnType<typeof lancerScanSection>> | null = null;
 
-  // LES BOARDS D'ABORD, et l'ordre porte une décision de budget. Les deux
-  // scanners se partagent le plafond de 300 s de la route ; celui des boards est
-  // borné et rapide (quelques dizaines de secondes, il balaie une liste finie),
-  // celui des annuaires est celui qui sature son `limit`. Le lancer en second
-  // avec le temps restant fait que c'est LUI qui rend une moisson partielle —
-  // ce qu'il annonce déjà par `plafond_atteint` — au lieu de faire sauter les
-  // boards en silence.
+  // TROIS GISEMENTS, dans cet ordre, et l'ordre porte une décision de budget.
   //
-  // Séquentiel et non parallèle : les deux écrivent dans data/pipeline.md, et
-  // même si `pipeline-lock` le rend sûr, deux balayages concurrents se
+  //   1. les boards de portals.yml      — liste finie, ~40 s mesurées
+  //   2. les entreprises suivies        — 88 entrées routées, 22 s mesurées
+  //   3. les annuaires d'ATS            — le seul qui sature son propre `limit`
+  //
+  // Les trois se partagent le plafond de 300 s de la route. Le balayage
+  // d'annuaires passe donc en DERNIER avec le temps restant : c'est lui qui rend
+  // une moisson partielle, ce qu'il annonce déjà par `plafond_atteint`, au lieu
+  // de faire sauter les deux autres en silence.
+  //
+  // ⚠️ Le balayage des ENTREPRISES a été ajouté le 2026-08-14, et son absence
+  // était un angle mort complet : `scan-ats-full.mjs` ne lit pas
+  // `tracked_companies` (zéro occurrence), donc les 119 entreprises suivies
+  // n'étaient balayées par AUCUNE automatisation — seulement par un
+  // `node scan.mjs` lancé à la main. Mesuré avant de le brancher : 22 s,
+  // 5 325 offres lues, 144 offres neuves qui n'entraient jamais dans le pipeline.
+  // La PR précédente justifiait leur absence par un dépassement du plafond de
+  // 300 s ; c'était une supposition, et elle était fausse.
+  //
+  // Séquentiel et non parallèle : les trois écrivent dans data/pipeline.md, et
+  // même si `pipeline-lock` le rend sûr, des balayages concurrents se
   // disputeraient le verrou pour ne rien gagner (leur coût est le réseau).
   const debut = Date.now();
   if (rescan && avecBoards) {
-    boards = await lancerScanBoards({ dry, timeoutMs: 120_000 });
+    boards = await lancerScanSection("boards", { dry, timeoutMs: 120_000 });
+  }
+  if (rescan && avecEntreprises) {
+    entreprises = await lancerScanSection("companies", { dry, timeoutMs: 120_000 });
   }
 
   if (rescan) {
@@ -312,6 +340,24 @@ export async function GET(req: Request) {
           ecartees_par_lieu: compteur(boards.run?.filtered_location),
           doublons: compteur(boards.run?.dupes),
           erreurs_de_source: compteur(boards.run?.errors),
+        }
+      : null,
+    // Les `tracked_companies` de portals.yml — le gisement qu'AUCUNE
+    // automatisation ne touchait avant le 2026-08-14. Compteurs distincts de
+    // `scan` et de `boards` : trois gisements, trois mesures, sinon on ne sait
+    // plus lequel rapporte.
+    entreprises: entreprises
+      ? {
+          lance: entreprises.lance,
+          apercu: dry,
+          erreur: entreprises.error,
+          balayees: compteur(entreprises.run?.companies),
+          offres_trouvees: compteur(entreprises.run?.found),
+          ajoutees_au_pipeline: compteur(entreprises.run?.new_added),
+          ecartees_par_intitule: compteur(entreprises.run?.filtered_title),
+          ecartees_par_lieu: compteur(entreprises.run?.filtered_location),
+          doublons: compteur(entreprises.run?.dupes),
+          erreurs_de_source: compteur(entreprises.run?.errors),
         }
       : null,
     pipeline: {
