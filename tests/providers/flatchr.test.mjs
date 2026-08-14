@@ -133,9 +133,14 @@ try {
     normalizeFlatchrItem({ published: true, vacancy: { title: 'No slug' } }, cible),
     normalizeFlatchrItem({ published: true, vacancy: { title: '  ', slug: 'ok' } }, cible),
     normalizeFlatchrItem({ published: true, vacancy: { title: 'Traversal', slug: '../../etc/passwd' } }, cible),
+    // A BARE dot segment: the character class allows dots because real slugs
+    // carry them, so `..` has to be excluded explicitly or it builds a URL that
+    // climbs a level.
+    normalizeFlatchrItem({ published: true, vacancy: { title: 'Dot', slug: '..' } }, cible),
+    normalizeFlatchrItem({ published: true, vacancy: { title: 'Dots', slug: 'a..b' } }, cible),
     normalizeFlatchrItem(null, cible),
   ];
-  if (drops.every((r) => r === null)) pass('normalizeFlatchrItem drops unpublished / vacancy-less / slug-less / empty-title / traversal / non-object items');
+  if (drops.every((r) => r === null)) pass('normalizeFlatchrItem drops unpublished / vacancy-less / slug-less / empty-title / traversal / dot-segment / non-object items');
   else fail(`drops = ${JSON.stringify(drops.map((d) => d && d.title))}`);
 
   const noDate = normalizeFlatchrItem({ published: true, vacancy: { title: 'T', slug: 'ok', address: ADDRESS } }, cible);
