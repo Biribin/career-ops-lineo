@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { erreurOpenAi, executeLlm } from "@/lib/llm-runner";
 import { parseRelance, promptRelance } from "@/lib/followup-draft.mjs";
@@ -33,6 +34,24 @@ function profilCv(): string {
   return "";
 }
 
+/**
+ * Le nom du candidat, depuis config/profile.yml. Le prompt demande de signer du
+ * SEUL nom du candidat : sans lui il écrit « le candidat » en signature, et une
+ * relance signée « le candidat » part chez un recruteur. L'appelant peut
+ * toujours l'imposer (`relance.candidat`) — ceci n'est qu'un repli.
+ * Un profile.yml absent est normal (tous les clones n'en ont pas) : repli muet.
+ */
+function nomCandidat(): string {
+  try {
+    const profil = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8")) as
+      | { candidate?: { full_name?: string } }
+      | undefined;
+    return String(profil?.candidate?.full_name ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
 export async function POST(req: Request) {
   let body: { relance?: Record<string, unknown>; consigne?: string };
   try {
@@ -47,7 +66,7 @@ export async function POST(req: Request) {
   }
 
   const prompt = promptRelance({
-    relance,
+    relance: { ...relance, candidat: String(relance.candidat ?? "").trim() || nomCandidat() },
     profilCv: profilCv(),
     consigne: String(body.consigne ?? "").slice(0, 600),
   });
