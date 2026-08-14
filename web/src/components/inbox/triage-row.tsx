@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, Check, Copy, ExternalLink, Loader2, MessageSquarePlus, ScanSearch, Sparkles, X } from "lucide-react";
+import { Bookmark, BookmarkCheck, Check, Coins, Copy, ExternalLink, Loader2, MessageSquarePlus, ScanSearch, Sparkles, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
@@ -34,6 +34,7 @@ export function TriageRow({
   onToggleSelect,
   onSave,
   onSkip,
+  onEvaluationComplete,
 }: {
   job: InboxJob;
   source: AtsSource | null;
@@ -44,6 +45,10 @@ export function TriageRow({
   onToggleSelect: () => void;
   onSave: () => void;
   onSkip: () => void;
+  /** Lance la VRAIE évaluation (mode oferta : note, rapport, ligne de tracker),
+   *  proposée depuis le panneau du pré-filtre. Le parent la tient parce que c'est
+   *  lui qui possède startJob. */
+  onEvaluationComplete: () => void;
 }) {
   const ago = agoLabel(age);
   const evaluated = !!scored && (scored.running || scored.score != null);
@@ -81,6 +86,9 @@ export function TriageRow({
   };
   const [fit, setFit] = useState<Fit | null>(null);
   const [fitEnCours, setFitEnCours] = useState(false);
+  // Armement du bouton « évaluation complète » : premier clic annonce la dépense,
+  // second la déclenche. Même discipline que la barre de sélection.
+  const [arme, setArme] = useState(false);
 
   // ── Générer la candidature (lettre + CV) via le workflow n8n 2 ─────────────
   //
@@ -251,11 +259,15 @@ export function TriageRow({
               type="button"
               onClick={evaluerOffre}
               disabled={fitEnCours}
-              title="Évaluer — lit l'annonce et signale les exigences bloquantes"
+              title="Lit l'annonce et signale les exigences bloquantes. Gratuit : ne produit ni note, ni rapport, ni ligne de suivi."
               className="inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-hover hover:text-brand disabled:opacity-60 max-sm:min-h-[44px]"
             >
               {fitEnCours ? <Loader2 className="size-4 animate-spin" /> : <ScanSearch className="size-4" />}
-              <span className="max-sm:hidden">{fitEnCours ? "…" : "Évaluer"}</span>
+              {/* « Lire l'annonce » et non « Évaluer » : deux commandes s'appelaient
+                  Évaluer avec des conséquences opposées, et la seule qui produise une
+                  note et un rapport est celle du lot. Nommer celle-ci par ce qu'elle
+                  fait supprime la confusion. */}
+              <span className="max-sm:hidden">{fitEnCours ? "…" : "Lire l'annonce"}</span>
             </button>
           )}
 
@@ -375,6 +387,33 @@ export function TriageRow({
                   Avancé sans citation dans l&rsquo;annonce, donc non retenu :{" "}
                   {fit.bloquantsNonVerifies.join(" · ")}
                 </p>
+              )}
+
+              {/* La suite. Sans ce bouton le panneau était un cul-de-sac : il dit
+                  « à regarder » au moment précis où l'on sait que la dépense vaut
+                  le coup, et il fallait retourner mettre l'offre de côté pour la
+                  faire évaluer par la barre du bas. Le coût est annoncé et gaté par
+                  une confirmation explicite, comme dans la barre : jamais de
+                  dépense par surprise. */}
+              {!evaluated && (
+                <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2">
+                  <button
+                    type="button"
+                    onClick={() => (arme ? (setArme(false), onEvaluationComplete()) : setArme(true))}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
+                      arme ? "bg-brand text-brand-foreground" : "bg-brand-soft text-brand hover:brightness-95",
+                    )}
+                  >
+                    <Coins className="size-3.5" />
+                    {arme ? "Confirmer : lancer et dépenser" : "Lancer l'évaluation complète"}
+                  </button>
+                  <span className="text-[11px] text-faint">
+                    {arme
+                      ? "note sur 5, rapport et ligne de suivi"
+                      : "consomme des jetons, contrairement à la lecture ci-dessus"}
+                  </span>
+                </div>
               )}
             </div>
           )}

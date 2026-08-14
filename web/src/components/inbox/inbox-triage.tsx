@@ -181,6 +181,17 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     return { tokens: Math.round(avgT * shortlist.length), usd: avgUsd != null ? +(avgUsd * shortlist.length).toFixed(2) : undefined };
   }, [jobs, shortlist.length]);
 
+  // Évaluation complète d'UNE offre, sans passer par la sélection.
+  //
+  // La barre du bas reste le geste normal (un seul passage de jetons pour tout un
+  // lot), mais le pré-filtre était un cul-de-sac : il affiche « à regarder » et ne
+  // proposait aucun geste suivant, alors que c'est précisément le moment où on sait
+  // que ça vaut la dépense. Même `kind` et même `page` que le lot, donc le badge de
+  // note et le rapport arrivent exactement pareil.
+  const evaluerUneOffre = (job: { url: string; company: string; role: string }) => {
+    startJob({ title: `Évaluation · ${job.company}`, subtitle: job.role, kind: "evaluate", input: job.url, page: "/pipeline" });
+  };
+
   const scoreShortlist = () => {
     const batchId = `shortlist-${Date.now()}`;
     for (const it of shortlist) {
@@ -273,6 +284,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
                       onToggleSelect={() => toggleSelect(e.job.url)}
                       onSave={() => save(e.job)}
                       onSkip={() => skip(e.job)}
+                      onEvaluationComplete={() => evaluerUneOffre(e.job)}
                     />
                   ))}
                 </ul>
