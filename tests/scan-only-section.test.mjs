@@ -88,23 +88,42 @@ try {
 
   // -- The endpoint must actually use it -------------------------------------
   const route = readFileSync(join(ROOT, 'web/src/app/api/scan/route.ts'), 'utf-8');
-  if (route.includes('"--only", "boards"')) {
+  if (route.includes('lancerScanSection("boards"')) {
     pass('GET /api/scan sweeps the portals.yml boards via --only boards');
   } else {
     fail('GET /api/scan does not launch the board sweep');
   }
-  // Boards first, then the directories: they share the route's 300 s ceiling, and
-  // the directory sweep is the one that saturates its own `limit`. Reversing the
-  // order would drop the boards on a timeout instead.
-  if (route.indexOf('lancerScanBoards({') < route.indexOf('await lancerScan(args')) {
-    pass('the board sweep runs BEFORE the directory sweep (shared time budget)');
+  // The companies sweep was the second half of the same blind spot:
+  // scan-ats-full.mjs reads neither section, so 119 tracked companies were swept
+  // by nothing automatic. Measured before wiring it: 22 s, 144 fresh offers.
+  if (route.includes('lancerScanSection("companies"')) {
+    pass('GET /api/scan also sweeps the tracked companies via --only companies');
   } else {
-    fail('the directory sweep runs first, so a slow one would starve the boards');
+    fail('GET /api/scan does not launch the company sweep — the 119 tracked companies stay unswept');
   }
-  if (route.includes('sp.get("boards") !== "0"')) {
-    pass('the board sweep is on by default and can be cut with boards=0');
+  // Order = budget. The three share the route's 300 s ceiling; the directory
+  // sweep is the one that saturates its own `limit` and already says so through
+  // `plafond_atteint`, so it goes LAST. Reversing would drop the two portals.yml
+  // sweeps on a timeout instead, silently.
+  const iBoards = route.indexOf('lancerScanSection("boards"');
+  const iCompanies = route.indexOf('lancerScanSection("companies"');
+  const iAnnuaires = route.indexOf('await lancerScan(args');
+  if (iBoards < iCompanies && iCompanies < iAnnuaires) {
+    pass('order is boards -> companies -> directories (the saturating sweep runs last)');
   } else {
-    fail('GET /api/scan has no boards=0 switch');
+    fail(`sweep order is wrong: boards@${iBoards}, companies@${iCompanies}, directories@${iAnnuaires}`);
+  }
+  if (route.includes('sp.get("boards") !== "0"') && route.includes('sp.get("companies") !== "0"')) {
+    pass('both portals.yml sweeps are on by default and cuttable with boards=0 / companies=0');
+  } else {
+    fail('GET /api/scan lacks a boards=0 or companies=0 switch');
+  }
+  // Separate counter blocks: three sources, three measurements, or nobody can
+  // tell which one is producing.
+  if (/entreprises:\s*entreprises/.test(route) && /boards:\s*boards/.test(route)) {
+    pass('the response reports the two sweeps separately');
+  } else {
+    fail('the response merges or omits a sweep block');
   }
 } catch (e) {
   fail(`--only section tests crashed: ${e.message}`);
