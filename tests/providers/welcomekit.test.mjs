@@ -1,25 +1,25 @@
-// tests/providers/welcomekit.test.mjs — WelcomeKit, l'ATS historique de Welcome
-// to the Jungle, servi en HTML sur `<slug>.welcomekit.co`.
+// tests/providers/welcomekit.test.mjs — WelcomeKit, Welcome to the Jungle's
+// legacy ATS, served as HTML at `<slug>.welcomekit.co`.
 //
-// Ce que ces tests protègent :
-//   1. Le balisage réel du board (constaté le 2026-08-12 sur un board de
-//      40 postes) reste parsable : classes en guillemets MÉLANGÉS simples et
-//      doubles dans le même document, icône `<i>` avant chaque valeur, lien
-//      relatif. Chacun de ces trois détails casse un parseur naïf.
-//   2. L'hôte est épinglé. `careers_url` n'est pas toujours écrit à la main
-//      (des entrées naissent d'URL d'offres France Travail), donc un hôte
-//      contrefait ne doit pas devenir un board.
-//   3. Une URL relative devient absolue : l'URL est la clé de déduplication du
-//      scanner, une URL relative la rendrait inutilisable.
+// What these tests protect:
+//   1. The board's real markup (observed 2026-08-12 on a 40-posting board) stays
+//      parseable: MIXED single and double attribute quotes in the same document,
+//      an `<i>` icon before every value, and relative hrefs. Each of those three
+//      details breaks a naive parser.
+//   2. The host stays pinned. `careers_url` is not always hand-written (entries
+//      are created from France Travail offer URLs too), so a lookalike host must
+//      not become a board.
+//   3. A relative URL becomes absolute: the URL is the scanner's dedup key, so a
+//      relative one would be unusable.
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 console.log('\nProvider — welcomekit');
 
-// Extrait fidèle du vrai board : guillemets simples sur `jobs-list-item` et
-// `jobs-list-item-title`, doubles sur `jobs-list-item-link`, icônes avant les
-// valeurs, href relatif.
+// Faithful excerpt of the real board: single quotes on `jobs-list-item` and
+// `jobs-list-item-title`, double on `jobs-list-item-link`, icons before values,
+// relative hrefs.
 const BOARD = `<!DOCTYPE html><html class='nutripure'><head><title>Jobs</title></head><body>
 <ul class='jobs-list'>
   <li class='jobs-list-item' data-department='38206' data-office='28372'>
@@ -42,97 +42,96 @@ const BOARD = `<!DOCTYPE html><html class='nutripure'><head><title>Jobs</title><
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/welcomekit.mjs')).href);
   const welcomekit = mod.default;
-  const { parseWelcomekitBoard, origineBoard } = mod;
+  const { parseWelcomekitBoard, boardOrigin } = mod;
 
-  if (welcomekit.id === 'welcomekit') pass('welcomekit.id vaut "welcomekit"');
-  else fail(`welcomekit.id vaut ${JSON.stringify(welcomekit.id)}`);
+  if (welcomekit.id === 'welcomekit') pass('welcomekit.id is "welcomekit"');
+  else fail(`welcomekit.id is ${JSON.stringify(welcomekit.id)}`);
 
-  const offres = parseWelcomekitBoard(BOARD, 'https://nutripure.welcomekit.co/', 'Nutripure');
+  const jobs = parseWelcomekitBoard(BOARD, 'https://nutripure.welcomekit.co/', 'Nutripure');
 
-  // Trois blocs, mais le troisième répète l'URL du premier : la clé de dédup du
-  // scanner est l'URL, donc deux postes listés sous deux départements ne doivent
-  // pas compter double.
-  if (offres.length === 2) pass('les offres sont parsées et dédupliquées par URL');
-  else fail(`parseWelcomekitBoard rend ${offres.length} offre(s) : ${JSON.stringify(offres)}`);
+  // Three blocks, but the third repeats the first one's URL: the scanner's dedup
+  // key is the URL, so one role listed under two departments must not count twice.
+  if (jobs.length === 2) pass('postings are parsed and deduped by URL');
+  else fail(`parseWelcomekitBoard returned ${jobs.length} posting(s): ${JSON.stringify(jobs)}`);
 
-  const premiere = offres[0];
+  const first = jobs[0];
   if (
-    premiere?.title === 'Data Platform Engineer' &&
-    premiere?.url === 'https://nutripure.welcomekit.co/jobs/data-platform-engineer_toulouse' &&
-    premiere?.company === 'Nutripure' &&
-    premiere?.location === 'Toulouse'
+    first?.title === 'Data Platform Engineer' &&
+    first?.url === 'https://nutripure.welcomekit.co/jobs/data-platform-engineer_toulouse' &&
+    first?.company === 'Nutripure' &&
+    first?.location === 'Toulouse'
   ) {
-    pass('titre, URL absolue, entreprise et lieu sont remontés');
+    pass('title, absolute URL, company and location are surfaced');
   } else {
-    fail(`première offre inattendue : ${JSON.stringify(premiere)}`);
+    fail(`unexpected first posting: ${JSON.stringify(first)}`);
   }
 
-  // L'icône `<i>` précède le lieu dans le balisage : sans retrait des balises,
-  // `location` vaudrait l'icône plus le texte.
-  if (!/icon|<|>/.test(String(premiere?.location))) pass('le lieu ne traîne pas de balisage');
-  else fail(`lieu pollué : ${JSON.stringify(premiere?.location)}`);
+  // The `<i>` icon precedes the location in the markup: without stripping tags,
+  // `location` would carry the icon along with the text.
+  if (!/icon|<|>/.test(String(first?.location))) pass('location carries no leftover markup');
+  else fail(`polluted location: ${JSON.stringify(first?.location)}`);
 
-  // Les entités HTML doivent être décodées : « Chargé.e d'approvisionnement »,
-  // pas « Charg&eacute;.e d&#39;... », sinon le filtre de mots-clés du scanner
-  // ne reconnaît plus le titre.
-  if (offres[1]?.title === "Chargé.e d'approvisionnement") pass('les entités HTML du titre sont décodées');
-  else fail(`titre non décodé : ${JSON.stringify(offres[1]?.title)}`);
+  // HTML entities must be decoded — "Chargé.e d'approvisionnement", not
+  // "Charg&eacute;.e d&#39;...", or the scanner's keyword filter no longer
+  // recognizes the title.
+  if (jobs[1]?.title === "Chargé.e d'approvisionnement") pass('HTML entities in the title are decoded');
+  else fail(`title not decoded: ${JSON.stringify(jobs[1]?.title)}`);
 
-  // Un document sans la moindre offre (slug inconnu : le board répond 200 avec un
-  // corps minuscule) ne doit rien produire — c'est ce qui permet à
-  // verify-portals de ne PAS le prendre pour un locataire existant.
-  if (parseWelcomekitBoard('<html><body>rien ici</body></html>', 'https://x.welcomekit.co/').length === 0) {
-    pass('un board vide rend zéro offre');
+  // A document with no posting at all (unknown slug: the board answers 200 with a
+  // tiny body) must produce nothing — that is what lets verify-portals NOT take it
+  // for an existing tenant.
+  if (parseWelcomekitBoard('<html><body>nothing here</body></html>', 'https://x.welcomekit.co/').length === 0) {
+    pass('an empty board yields zero postings');
   } else {
-    fail('un board vide a produit des offres');
+    fail('an empty board produced postings');
   }
 
   if (parseWelcomekitBoard('', 'https://x.welcomekit.co/').length === 0 && parseWelcomekitBoard(null, 'https://x.welcomekit.co/').length === 0) {
-    pass('une entrée vide ou nulle ne fait pas tomber le parseur');
+    pass('empty or null input does not throw');
   } else {
-    fail('parseWelcomekitBoard mal protégé contre une entrée vide');
+    fail('parseWelcomekitBoard is not guarded against empty input');
   }
 
-  // ── Épinglage de l'hôte ──────────────────────────────────────────────────
-  const parCareers = welcomekit.detect({ name: 'Nutripure', careers_url: 'https://nutripure.welcomekit.co/' });
-  const parApi = welcomekit.detect({ name: 'Nutripure', api: 'https://nutripure.welcomekit.co/' });
-  if (parCareers?.url === 'https://nutripure.welcomekit.co/' && parApi?.url === 'https://nutripure.welcomekit.co/') {
-    pass('detect() revendique un board *.welcomekit.co, par careers_url comme par api');
+  // --- Host pinning --------------------------------------------------------
+  const viaCareers = welcomekit.detect({ name: 'Nutripure', careers_url: 'https://nutripure.welcomekit.co/' });
+  const viaApi = welcomekit.detect({ name: 'Nutripure', api: 'https://nutripure.welcomekit.co/' });
+  if (viaCareers?.url === 'https://nutripure.welcomekit.co/' && viaApi?.url === 'https://nutripure.welcomekit.co/') {
+    pass('detect() claims a *.welcomekit.co board, from careers_url and from api');
   } else {
-    fail(`detect() sur URL légitime = ${JSON.stringify({ parCareers, parApi })}`);
+    fail(`detect() on a legitimate URL = ${JSON.stringify({ viaCareers, viaApi })}`);
   }
 
-  const refus = [
-    { cas: 'http', entree: { careers_url: 'http://nutripure.welcomekit.co/' } },
-    { cas: 'hôte contrefait', entree: { careers_url: 'https://evil.example/nutripure.welcomekit.co' } },
-    { cas: 'suffixe usurpé', entree: { careers_url: 'https://welcomekit.co.evil.example/' } },
-    { cas: 'domaine nu', entree: { careers_url: 'https://welcomekit.co/' } },
-    { cas: 'autre ATS', entree: { careers_url: 'https://jobs.lever.co/acme' } },
-    { cas: 'sans URL', entree: { name: 'Acme' } },
+  const rejected = [
+    { name: 'http', entry: { careers_url: 'http://nutripure.welcomekit.co/' } },
+    { name: 'lookalike host', entry: { careers_url: 'https://evil.example/nutripure.welcomekit.co' } },
+    { name: 'suffix spoof', entry: { careers_url: 'https://welcomekit.co.evil.example/' } },
+    { name: 'bare domain', entry: { careers_url: 'https://welcomekit.co/' } },
+    { name: 'another ATS', entry: { careers_url: 'https://jobs.lever.co/acme' } },
+    { name: 'no URL', entry: { name: 'Acme' } },
   ];
-  const fuites = refus.filter((r) => origineBoard(r.entree) !== null).map((r) => r.cas);
-  if (fuites.length === 0) pass('aucune URL non-welcomekit ne passe pour un board');
-  else fail(`origineBoard() a accepté : ${fuites.join(', ')}`);
+  const leaks = rejected.filter((r) => boardOrigin(r.entry) !== null).map((r) => r.name);
+  if (leaks.length === 0) pass('no non-welcomekit URL passes for a board');
+  else fail(`boardOrigin() accepted: ${leaks.join(', ')}`);
 
-  // fetch() doit refuser franchement plutôt que d'aller chercher n'importe quoi.
-  let refusFetch = false;
+  // fetch() must refuse outright rather than go and fetch something else.
+  let refused = false;
   try {
     await welcomekit.fetch({ name: 'Acme', careers_url: 'https://jobs.lever.co/acme' }, { fetchText: async () => BOARD });
   } catch {
-    refusFetch = true;
+    refused = true;
   }
-  if (refusFetch) pass('fetch() refuse une entrée qui n’est pas un board welcomekit');
-  else fail('fetch() a accepté une entrée non-welcomekit');
+  if (refused) pass('fetch() refuses an entry that is not a welcomekit board');
+  else fail('fetch() accepted a non-welcomekit entry');
 
-  // Chemin nominal : une seule requête texte, aucune pagination (le board rend
-  // tous ses postes d'un coup — vérifié sur le vrai board).
-  let requetes = 0;
-  const jobs = await welcomekit.fetch(
+  // Nominal path: a single text request, no pagination (the board renders every
+  // posting at once — verified against the real board).
+  let requests = 0;
+  const fetched = await welcomekit.fetch(
     { name: 'Nutripure', careers_url: 'https://nutripure.welcomekit.co/' },
-    { fetchText: async () => { requetes += 1; return BOARD; } },
+    { fetchText: async () => { requests += 1; return BOARD; } },
   );
-  if (jobs.length === 2 && requetes === 1) pass('fetch() rend les offres en une seule requête');
-  else fail(`fetch() : ${jobs.length} offre(s) en ${requetes} requête(s)`);
+  if (fetched.length === 2 && requests === 1) pass('fetch() returns the postings in a single request');
+  else fail(`fetch(): ${fetched.length} posting(s) in ${requests} request(s)`);
 } catch (e) {
-  fail(`les tests du provider welcomekit ont planté : ${e.message}`);
+  fail(`welcomekit provider tests crashed: ${e.message}`);
 }

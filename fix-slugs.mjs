@@ -80,18 +80,18 @@ export function splitCompanyBlocks(text) {
  *   writer cannot express — the caller must then leave the entry alone.
  */
 export function resolvedUrls({ ats, slug, eu }) {
-  // La forme de l'URL publique vient de la table ATS de verify-portals, qui la
-  // porte à côté de l'URL de sondage. En garder une copie ici est ce qui a
-  // silencieusement écrit une suggestion SmartRecruiters en URL Lever le temps
-  // d'une régression : deux copies de la même correspondance dérivent.
+  // The public URL shape comes from verify-portals' ATS table, which carries it
+  // next to the probe URL. Keeping a copy here is what silently wrote a
+  // SmartRecruiters suggestion as a Lever URL for the length of a regression: two
+  // copies of the same mapping drift.
   const careersUrl = ATS[ats]?.careersUrl?.(slug, { eu });
-  // ATS inconnu de la table : on refuse plutôt que de deviner. L'appelant laisse
-  // alors l'entrée intacte et le signale, au lieu d'écrire une URL morte sous une
-  // note annonçant une migration réussie.
+  // An ATS the table doesn't know: refuse rather than guess. The caller then leaves
+  // the entry untouched and reports it, instead of writing a dead URL under a note
+  // announcing a successful migration.
   if (!careersUrl) return null;
-  // `api:` n'existe que là où le scanner gagne à pointer l'endpoint résolu.
-  // Ailleurs il doit être ABSENT (et supprimé s'il traînait) : un `api:`
-  // greenhouse laissé sur une entrée migrée reste appelé à chaque scan.
+  // `api:` exists only where the scanner gains from pinning the resolved endpoint.
+  // Everywhere else it must be ABSENT (and removed if it lingered): a greenhouse
+  // `api:` left on a migrated entry keeps being called on every scan.
   const api = ats === 'greenhouse' ? `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs` : null;
   return { careersUrl, api };
 }
@@ -360,9 +360,9 @@ async function main() {
     return;
   }
 
-  // `fetchText` doit être passé explicitement : sans lui, un board servi en HTML
-  // (WelcomeKit) ne serait jamais sondé, donc jamais suggéré, donc jamais réparé
-  // ici. Voir la garde de transport dans probeSlug.
+  // `fetchText` must be passed explicitly: without it an HTML-served board
+  // (WelcomeKit) is never probed, so never suggested, so never repaired here. See
+  // the transport guard in probeSlug.
   const { results } = await verifyPortalsFile(filePath, { fetchText });
   const rawText = readFileSync(filePath, 'utf-8');
   const { text, fixes, skipped } = computeFixes(rawText, results);

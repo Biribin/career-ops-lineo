@@ -2,145 +2,141 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 /** @typedef {import('./_types.js').Job} Job */
 //
-// WelcomeKit — l'ATS historique de Welcome to the Jungle, qui sert encore le
-// board carrières public de beaucoup d'employeurs français, sur
-// `<slug>.welcomekit.co`.
+// WelcomeKit — Welcome to the Jungle's legacy ATS, still serving the public
+// careers board of many French employers at `<slug>.welcomekit.co`.
 //
-// POURQUOI CE PROVIDER EXISTE
-// ---------------------------
-// C'était le trou par lequel des employeurs entiers échappaient au scanner. La
-// recherche d'ATS ne sondait que Greenhouse / Ashby / Lever / SmartRecruiters —
-// la pile des startups américaines — et rendait donc « aucun slug ne résout »
-// pour un employeur français dont le board tourne ici (constaté le 2026-08-11
-// sur un employeur suivi : board bien vivant, 40 postes, invisible pour
-// career-ops).
+// WHY THIS PROVIDER EXISTS
+// -----------------------
+// It was the hole whole employers fell through. Slug discovery probed only
+// Greenhouse / Ashby / Lever / SmartRecruiters — the US startup stack — so
+// "no slug variant resolved" was the mechanical answer for a French employer
+// whose board runs here (observed 2026-08-11 on a tracked company: board alive,
+// 40 openings, invisible to career-ops).
 //
-// Le board est RENDU CÔTÉ SERVEUR : pas d'API JSON (vérifié le 2026-08-12 —
-// `/jobs.json`, `/api/v1/jobs` répondent 404, et `?format=json` annonce
-// `application/json` en renvoyant du HTML, donc ne pas s'y fier), mais un
-// balisage stable et complet dans la page :
+// The board is SERVER-RENDERED: there is no JSON API (verified 2026-08-12 —
+// `/jobs.json` and `/api/v1/jobs` answer 404, and `?format=json` advertises
+// `application/json` while serving HTML, so do not trust its content type), but
+// the page carries stable, complete markup:
 //
 //   <li class='jobs-list-item' data-department='38206' data-office='28372'>
-//     <a class="jobs-list-item-link" href="/jobs/mon-poste_toulouse">
-//       <h3 class='jobs-list-item-title'> Mon poste </h3>
+//     <a class="jobs-list-item-link" href="/jobs/my-role_toulouse">
+//       <h3 class='jobs-list-item-title'> My role </h3>
 //       <ul class='jobs-list-item-details'>
 //         <li class='jobs-list-item-contract-type'>…CDI</li>
 //         <li class='jobs-list-item-office'>…Toulouse</li>
 //
-// UNE SEULE REQUÊTE : la page liste l'intégralité des postes, sans pagination
-// (aucun marqueur `pagination` / `page=` / load-more dans le document). Un board
-// de 40 offres arrive donc en un GET, ce qui respecte aussi le budget de
-// requêtes du health-check.
+// ONE REQUEST: the page lists every posting, with no pagination (no
+// `pagination` / `page=` / load-more marker anywhere in the document). A
+// 40-posting board therefore arrives in a single GET, which also keeps the
+// health-check's request budget intact.
 //
-// Le type de contrat (CDI, stage…) est présent dans le balisage mais volontairement
-// PAS remonté : la forme `Job` normalisée n'a pas de champ pour ça, et en inventer
-// un que personne ne consomme serait un changement de schéma gratuit.
+// The contract type (CDI, internship…) is present in the markup but deliberately
+// NOT surfaced: the normalized `Job` shape has no field for it, and inventing one
+// that nothing consumes would be a schema change for free.
 
 import { decodeEntities } from './_html-entities.mjs';
 
 const HOST_SUFFIX = '.welcomekit.co';
 
 /**
- * Le texte d'un fragment HTML : balises retirées, entités décodées, espaces
- * normalisés. Le balisage du board place une icône `<i>` avant chaque valeur,
- * donc retirer les balises est obligatoire avant de lire un lieu.
+ * The text of an HTML fragment: tags stripped, entities decoded, whitespace
+ * collapsed. The board's markup puts an `<i>` icon before every value, so
+ * stripping tags is mandatory before reading a location.
  *
  * @param {string} fragment
  * @returns {string}
  */
-function texte(fragment) {
+function textOf(fragment) {
   return decodeEntities(String(fragment ?? '').replace(/<[^>]*>/g, ' '))
     .replace(/\s+/g, ' ')
     .trim();
 }
 
 /**
- * La valeur d'un `<li class='jobs-list-item-XXX'>` dans un bloc d'offre.
+ * The value of a `<li class='jobs-list-item-XXX'>` inside a posting block.
  *
- * Les guillemets d'attributs sont acceptés simples OU doubles : le board mélange
- * les deux dans le même document (`class='jobs-list-item'` mais
- * `class="jobs-list-item-link"`), donc épingler un seul style casserait sur
- * l'autre.
+ * Attribute quotes are accepted single OR double: the board mixes both in the
+ * same document (`class='jobs-list-item'` but `class="jobs-list-item-link"`), so
+ * pinning one style breaks on the other.
  *
- * @param {string} bloc
- * @param {string} classe - Suffixe de classe, ex. 'office'.
+ * @param {string} block
+ * @param {string} suffix - Class suffix, e.g. 'office'.
  * @returns {string}
  */
-function detail(bloc, classe) {
-  const re = new RegExp(`<li[^>]*class=['"]jobs-list-item-${classe}['"][^>]*>([\\s\\S]*?)<\\/li>`, 'i');
-  const m = bloc.match(re);
-  return m ? texte(m[1]) : '';
+function detail(block, suffix) {
+  const re = new RegExp(`<li[^>]*class=['"]jobs-list-item-${suffix}['"][^>]*>([\\s\\S]*?)<\\/li>`, 'i');
+  const m = block.match(re);
+  return m ? textOf(m[1]) : '';
 }
 
 /**
- * Parser un board WelcomeKit en offres normalisées.
+ * Parse a WelcomeKit board into normalized Job objects.
  *
- * Exporté pour être testé hors réseau : `fetch()` ne fait que l'envelopper.
+ * Exported for offline unit testing; `fetch()` only wraps it around an HTTP GET.
  *
- * @param {string} html - Le document du board.
- * @param {string} origine - L'origine du board (`https://slug.welcomekit.co`),
- *   pour absolutiser les liens relatifs — l'URL est la clé de déduplication du
- *   scanner, donc un lien relatif la rendrait inutilisable.
- * @param {string} [entreprise] - Nom à porter sur chaque offre.
+ * @param {string} html - The board document.
+ * @param {string} origin - The board origin (`https://slug.welcomekit.co`), used
+ *   to absolutize relative links — the URL is the scanner's dedup key, so a
+ *   relative one would be unusable.
+ * @param {string} [company] - Name to carry on every posting.
  * @returns {Job[]}
  */
-export function parseWelcomekitBoard(html, origine, entreprise = '') {
+export function parseWelcomekitBoard(html, origin, company = '') {
   const doc = String(html ?? '');
-  // Découpage sur les frontières de `<li class='jobs-list-item'>`. Le premier
-  // morceau est l'en-tête de page : il ne porte pas d'offre.
-  const morceaux = doc.split(/<li[^>]*class=['"]jobs-list-item['"]/i);
-  const offres = [];
-  const vues = new Set();
+  // Split on `<li class='jobs-list-item'>` boundaries. The first chunk is the
+  // page header: it carries no posting.
+  const chunks = doc.split(/<li[^>]*class=['"]jobs-list-item['"]/i);
+  const jobs = [];
+  const seen = new Set();
 
-  for (let i = 1; i < morceaux.length; i++) {
-    const bloc = morceaux[i];
-    const lien = bloc.match(/<a[^>]*class=['"]jobs-list-item-link['"][^>]*href=['"]([^'"]+)['"]/i)
-      || bloc.match(/<a[^>]*href=['"]([^'"]+)['"][^>]*class=['"]jobs-list-item-link['"]/i);
-    const titre = bloc.match(/<h3[^>]*class=['"]jobs-list-item-title['"][^>]*>([\s\S]*?)<\/h3>/i);
-    if (!lien || !titre) continue;
+  for (let i = 1; i < chunks.length; i++) {
+    const block = chunks[i];
+    const link = block.match(/<a[^>]*class=['"]jobs-list-item-link['"][^>]*href=['"]([^'"]+)['"]/i)
+      || block.match(/<a[^>]*href=['"]([^'"]+)['"][^>]*class=['"]jobs-list-item-link['"]/i);
+    const heading = block.match(/<h3[^>]*class=['"]jobs-list-item-title['"][^>]*>([\s\S]*?)<\/h3>/i);
+    if (!link || !heading) continue;
 
-    const title = texte(titre[1]);
+    const title = textOf(heading[1]);
     if (!title) continue;
 
     let url;
     try {
-      url = new URL(decodeEntities(lien[1]), origine).toString();
+      url = new URL(decodeEntities(link[1]), origin).toString();
     } catch {
-      continue; // href inexploitable : une offre sans URL n'est pas dédupliquable
+      continue; // unusable href: a posting with no URL cannot be deduped
     }
-    // Le même poste peut être listé sous deux départements : la clé de dédup du
-    // scanner est l'URL, on l'applique donc déjà ici.
-    if (vues.has(url)) continue;
-    vues.add(url);
+    // The same role can be listed under two departments. The scanner's dedup key
+    // is the URL, so apply it here already.
+    if (seen.has(url)) continue;
+    seen.add(url);
 
-    offres.push({
+    jobs.push({
       title,
       url,
-      company: entreprise,
-      location: detail(bloc, 'office'),
+      company,
+      location: detail(block, 'office'),
     });
   }
 
-  return offres;
+  return jobs;
 }
 
 /**
- * L'origine du board pour une entrée, si elle est légitime.
+ * The board origin for an entry, when it is legitimate.
  *
- * Épinglée sur `*.welcomekit.co` en https, comme chaque provider épingle son
- * hôte : `careers_url` n'est pas toujours écrit à la main (des entrées sont
- * créées depuis des URL d'offres venues de France Travail), donc l'hôte doit
- * être vérifié et non deviné.
+ * Pinned to `*.welcomekit.co` over https, the way every provider pins its host:
+ * `careers_url` is not always hand-written (entries are also created from offer
+ * URLs coming off France Travail), so the host must be verified, not assumed.
  *
- * @param {{careers_url?: string, api?: string, provider?: string, name?: string}} entree
+ * @param {{careers_url?: string, api?: string, provider?: string, name?: string}} entry
  * @returns {string|null}
  */
-export function origineBoard(entree) {
-  for (const brut of [entree?.api, entree?.careers_url]) {
-    if (typeof brut !== 'string' || !brut) continue;
+export function boardOrigin(entry) {
+  for (const raw of [entry?.api, entry?.careers_url]) {
+    if (typeof raw !== 'string' || !raw) continue;
     let u;
     try {
-      u = new URL(brut);
+      u = new URL(raw);
     } catch {
       continue;
     }
@@ -156,13 +152,13 @@ export default {
   id: 'welcomekit',
 
   detect(entry) {
-    const url = origineBoard(entry);
+    const url = boardOrigin(entry);
     return url ? { url } : null;
   },
 
   async fetch(entry, ctx) {
-    const url = origineBoard(entry);
-    if (!url) throw new Error(`welcomekit: careers_url n'est pas un board *.welcomekit.co pour ${entry?.name ?? '(sans nom)'}`);
+    const url = boardOrigin(entry);
+    if (!url) throw new Error(`welcomekit: careers_url is not a *.welcomekit.co board for ${entry?.name ?? '(unnamed)'}`);
     const html = await ctx.fetchText(url);
     return parseWelcomekitBoard(html, url, typeof entry?.name === 'string' ? entry.name : '');
   },

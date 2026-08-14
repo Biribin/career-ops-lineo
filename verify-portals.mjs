@@ -51,12 +51,12 @@ const PROVIDERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'provider
 // response, for each supported ATS. Greenhouse/Ashby wrap jobs in `{ jobs }`;
 // Lever returns a bare array. `includeCompensation` mirrors the ashby provider.
 //
-// `careersUrl` est la forme PUBLIQUE de l'URL, celle qui s'écrit dans
-// portals.yml. Elle vit ici, à côté de l'URL de sondage, parce que c'est la même
-// connaissance : « cet ATS, ce slug, quelle adresse ». fix-slugs.mjs la lit
-// depuis cette table au lieu d'en tenir une copie — deux copies de cette
-// correspondance ont déjà divergé une fois (une suggestion SmartRecruiters
-// s'écrivait en URL Lever, cf. tests/fix-slugs-resolved-urls.test.mjs).
+// `careersUrl` is the PUBLIC URL shape — the one written into portals.yml. It
+// lives here, next to the probe URL, because it is the same knowledge: "this ATS,
+// this slug, which address". fix-slugs.mjs reads it from this table instead of
+// keeping a copy: two copies of that mapping already drifted once, and a
+// SmartRecruiters suggestion was being written as a Lever URL (pinned by
+// tests/fix-slugs-resolved-urls.test.mjs).
 export const ATS = {
   greenhouse: {
     probeUrl: (slug) =>
@@ -112,24 +112,22 @@ export const ATS = {
         : null,
     emptyProvesTenant: false,
   },
-  // WelcomeKit : l'ATS historique de Welcome to the Jungle, sur
-  // `<slug>.welcomekit.co`. Ajouté parce que c'était le trou par lequel des
-  // employeurs FRANÇAIS entiers échappaient à la découverte : les quatre ATS
-  // ci-dessus sont la pile des startups américaines, donc « aucun slug ne
-  // résout » était la réponse mécanique pour un board français vivant (constaté
-  // le 2026-08-11 sur un employeur suivi, 40 postes ouverts, invisible).
+  // WelcomeKit: Welcome to the Jungle's legacy ATS, at `<slug>.welcomekit.co`.
+  // Added because it was the hole whole FRENCH employers fell through: the four
+  // ATSes above are the US startup stack, so "no slug variant resolved" was the
+  // mechanical answer for a live French board (observed 2026-08-11 on a tracked
+  // company with 40 open roles, invisible to career-ops).
   //
-  // `transport: 'text'` : ce board n'a PAS d'API JSON (vérifié le 2026-08-12 :
-  // /jobs.json et /api/v1/jobs répondent 404, et `?format=json` annonce
-  // `application/json` en servant du HTML). On compte donc les offres avec le
-  // parseur du provider lui-même, pas avec un compteur maison : le sondage
-  // mesure ainsi exactement ce que le scanner saura lire en production, et les
-  // deux ne peuvent pas dériver.
+  // `transport: 'text'`: this board has NO JSON API (verified 2026-08-12 —
+  // /jobs.json and /api/v1/jobs answer 404, and `?format=json` advertises
+  // `application/json` while serving HTML). Postings are therefore counted with
+  // the provider's OWN parser rather than a bespoke counter, so the probe measures
+  // exactly what the scanner will read in production and the two cannot drift.
   //
-  // `emptyProvesTenant: false` pour la MÊME raison que SmartRecruiters, vérifiée
-  // sur le vif le 2026-08-12 : un slug inventé répond **200** avec un corps de
-  // 63 octets et zéro offre. Sans ce drapeau, `--add` suggérerait un board
-  // WelcomeKit pour n'importe quel nom d'entreprise au monde.
+  // `emptyProvesTenant: false` for the SAME reason as SmartRecruiters, verified
+  // live on 2026-08-12: an invented slug answers **200** with a 63-byte body and
+  // zero postings. Without the flag, `--add` would suggest a WelcomeKit board for
+  // any company name on earth.
   welcomekit: {
     probeUrl: (slug) => `https://${slug}.welcomekit.co/`,
     careersUrl: (slug) => `https://${slug}.welcomekit.co/`,
@@ -294,11 +292,11 @@ export async function probeSlug(
       reason: `unknown ATS: ${ats}`,
     };
   const url = spec.probeUrl(slug, { eu });
-  // Un ATS servi en HTML exige un transport texte EXPLICITE. Ne pas le défauter
-  // sur le vrai réseau est ce qui garde les suites hors-ligne : les tests qui
-  // n'injectent que `fetchJson` (dont tests/verify-portals-ats.test.mjs, dont
-  // l'en-tête interdit tout accès réseau) verraient sinon chaque découverte
-  // partir vers welcomekit.co pour de vrai.
+  // An HTML-served ATS requires an EXPLICIT text transport. Not defaulting it to
+  // the real network is what keeps the suites offline: tests that inject only
+  // `fetchJson` (including tests/verify-portals-ats.test.mjs, whose header forbids
+  // any network access) would otherwise see every discovery reach out to
+  // welcomekit.co for real.
   if (spec.transport === 'text' && typeof fetchText !== 'function') {
     return {
       ats,
@@ -660,13 +658,12 @@ export async function runAdd(name, { fetchJson = defaultFetchJson, fetchText = n
       );
     }
   } else {
-    // L'URL RÉSOLUE, pas seulement l'ats et le slug. Le lecteur de cette sortie
-    // est en général un agent chargé d'écrire `careers_url` dans portals.yml :
-    // « welcomekit → slug 'nutripure' » l'obligerait à deviner la forme de l'URL,
-    // et `https://welcomekit.co/nutripure` (au lieu de
-    // `https://nutripure.welcomekit.co/`) est un slug mort écrit en silence, soit
-    // exactement ce que ce script existe pour empêcher. Le sondage connaît l'URL :
-    // il la donne.
+    // The RESOLVED URL, not just the ats and the slug. This output is usually read
+    // by an agent tasked with writing `careers_url` into portals.yml:
+    // "welcomekit → slug 'nutripure'" forces it to guess the URL shape, and
+    // `https://welcomekit.co/nutripure` (instead of
+    // `https://nutripure.welcomekit.co/`) is a dead slug written silently — exactly
+    // what this script exists to prevent. The probe knows the URL: it prints it.
     log(
       `\nSuggested: careers_url for ${best.ats}${best.eu ? ' (EU instance)' : ''} → slug '${best.slug}'` +
         `\n  careers_url: ${ATS[best.ats]?.careersUrl?.(best.slug, { eu: best.eu }) ?? best.url}`,
@@ -682,8 +679,8 @@ async function main() {
   const args = process.argv.slice(2);
   const strict = args.includes('--strict');
   const fetchJson = defaultFetchJson;
-  // Le vrai transport texte n'est branché QUE sur les chemins CLI : voir la garde
-  // de probeSlug pour pourquoi il n'a pas de valeur par défaut ailleurs.
+  // The real text transport is wired ONLY on the CLI paths: see probeSlug's guard
+  // for why it has no default anywhere else.
   const fetchText = defaultFetchText;
 
   const addFlag = args.indexOf('--add');
