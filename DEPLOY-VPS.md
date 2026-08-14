@@ -188,7 +188,8 @@ que le CLI primaire échoue, donc le repli produisait des scores non fondés.
 ## Couche utilisateur : comment elle arrive dans le conteneur
 
 `docker-entrypoint-web.sh` (branché en `ENTRYPOINT`, derrière `tini`) relie à chaque
-démarrage les quatre fichiers gitignorés depuis le volume persistant :
+démarrage les fichiers gitignorés depuis le volume persistant, plus le répertoire
+des rapports :
 
 ```
 /app/data/perso/cv.md       -> /app/cv.md
@@ -196,7 +197,13 @@ démarrage les quatre fichiers gitignorés depuis le volume persistant :
 /app/data/perso/profile.yml -> /app/config/profile.yml
 /app/data/perso/_profile.md -> /app/modes/_profile.md
 /app/data/perso/career-ops.env -> /app/.env        (optionnel)
+/app/data/perso/reports/    -> /app/reports        (répertoire)
 ```
+
+`reports/` a été ajouté le 2026-08-14 : c'était le seul artefact écrit par le cœur
+qui restait dans la couche conteneur. Comme `data/applications.md` vit sur le volume
+et référence chaque rapport par un lien relatif `reports/NNN-….md`, le tracker
+survivait aux redéploiements en pointant vers des fichiers disparus.
 
 Le volume survit aux redéploiements, donc c'est à provisionner **une seule fois**.
 Depuis le clone `career-ops-data` (la sauvegarde canonique, sync 12:30) :

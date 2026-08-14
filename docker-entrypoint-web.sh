@@ -50,10 +50,40 @@ lier() {
   echo "entrypoint: /app/$1 -> $cible"
 }
 
+# lier un REPERTOIRE ecrit a l'execution. Meme principe, deux differences :
+# l'amorcage verse le CONTENU dans le volume au lieu de copier un fichier, et le
+# repertoire est cree vide s'il n'existe nulle part (un lien mort ferait echouer
+# l'ecriture au lieu de la persister).
+lier_dossier() {
+  dest="/app/$1"
+  cible="$PERSO/$2"
+
+  if [ ! -e "$cible" ]; then
+    mkdir -p "$cible"
+    if [ -d "$dest" ] && [ ! -L "$dest" ]; then
+      cp -a "$dest/." "$cible/" 2>/dev/null || true
+      echo "entrypoint: contenu de $1 verse vers le volume (amorcage)"
+    fi
+  fi
+
+  rm -rf "$dest"
+  ln -s "$cible" "$dest"
+  echo "entrypoint: /app/$1 -> $cible"
+}
+
 lier cv.md              cv.md
 lier portals.yml        portals.yml
 lier config/profile.yml profile.yml
 lier modes/_profile.md  _profile.md
+
+# Les rapports d'evaluation. Ils etaient les seuls artefacts ECRITS par le coeur
+# a rester dans la couche conteneur : `data/applications.md` vit sur le volume et
+# reference chaque rapport par un lien relatif `reports/NNN-...md`, donc au
+# redeploy suivant le tracker survivait en pointant vers des fichiers disparus.
+# Constate le 2026-08-14 : /app/reports ne contenait que son .gitkeep alors que le
+# volume portait un repertoire `data/reports,` (avec une virgule) — la trace d'une
+# tentative precedente, jamais reliee.
+lier_dossier reports    reports
 
 # Cle(s) d'API optionnelles posees sur le volume plutot que dans Coolify.
 # Les .mjs racine chargent dotenv, et le Gemini CLI lit aussi le fichier depuis
