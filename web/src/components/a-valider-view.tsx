@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Download, ExternalLink, Eye, FileText, GraduationCap, Loader2, Mail, PenLine, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
@@ -262,7 +263,11 @@ function Carte({ fiche, onDecide }: { fiche: Fiche; onDecide: () => void }) {
           {sansCourriel ? (
             <span>
               Aucun courriel de recruteur — <strong>Valider</strong> t’enverra tout prêt à coller pour un dépôt
-              manuel sur le portail.
+              manuel sur le portail. Elle t’attendra ensuite dans{" "}
+              <Link href="/a-deposer" className="font-medium text-brand hover:underline">
+                À déposer
+              </Link>
+              , où le clic sur «&nbsp;c’est déposé&nbsp;» l’inscrit au tracker et arme la relance.
             </span>
           ) : (
             <span>
