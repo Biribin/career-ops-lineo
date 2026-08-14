@@ -57,6 +57,7 @@ const DEFAULT_SECTION_TITLES = {
   certifications: 'Certifications',
   awards: 'Awards & Honors',
   skills: 'Skills',
+  references: 'References',
 };
 
 // Escape user text for HTML text/attribute context. Covers the five characters
@@ -492,6 +493,44 @@ function buildAwards(entries, partial) {
   }).join('\n    ');
 }
 
+/**
+ * Professional references: one line per referee.
+ *
+ * `phone` is deliberately optional and NOT defaulted to a placeholder. A referee's
+ * number travels in every copy of the CV and is stored by every ATS that ingests
+ * it, so a candidate must be able to name a referee without publishing their
+ * mobile — the section then renders "contact on request" in place of the number,
+ * rather than a silent gap that reads as an omission.
+ */
+function buildReferences(entries, partial) {
+  if (!Array.isArray(entries) || entries.length === 0) return '';
+  if (!partial) {
+    return entries.filter(Boolean).map(e => {
+      const role = e.role ? `<span class="reference-role">${escapeHtml(e.role)}</span>` : '<span class="reference-role"></span>';
+      const contact = e.phone || e.email || '';
+      const contactText = contact ? escapeHtml(contact) : 'contact on request';
+      return `<div class="reference-item">
+      <span class="reference-name">${escapeHtml(e.name)}</span>
+      ${role}
+      <span class="reference-contact">${contactText}</span>
+    </div>`;
+    }).join('\n    ');
+  }
+
+  const { entryTemplate, blocks } = partial;
+  return entries.filter(Boolean).map(e => {
+    const contact = e.phone || e.email || '';
+    const blockValues = new Map([
+      ['ROLE_BLOCK', { value: escapeHtml(e.role || ''), present: Boolean(e.role) }],
+    ]);
+    return fillEntry(entryTemplate, blocks, {
+      NAME:         escapeHtml(e.name || ''),
+      ROLE:         escapeHtml(e.role || ''),
+      CONTACT_TEXT: contact ? escapeHtml(contact) : 'contact on request',
+    }, blockValues);
+  }).join('\n    ');
+}
+
 function buildSkills(categories, partial) {
   if (!Array.isArray(categories) || categories.length === 0) return '';
   if (!partial) {
@@ -584,6 +623,8 @@ function renderReport(payload, partials) {
     AWARDS: buildAwards(payload.awards, partials.get('awards')),
     SECTION_SKILLS: escapeHtml(sectionTitles.skills),
     SKILLS: buildSkills(payload.skills, partials.get('skills')),
+    SECTION_REFERENCES: escapeHtml(sectionTitles.references),
+    REFERENCES: buildReferences(payload.references, partials.get('references')),
   };
   return { substitutions, candidate };
 }

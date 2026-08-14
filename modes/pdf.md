@@ -33,7 +33,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 8. Before tailoring, optionally compare the new JD with the latest tailored CV or JD. Resolve the application/report first with `node find.mjs {report-or-tracker-number}`. Use the resolved report/JD snapshot as `{new-jd.txt}` and the referenced prior CV or prior JD as `{previous-jd-or-cv.txt}`; if either source cannot be located, do not silently reuse a CV. Run `npm run jd:similarity -- {new-jd.txt} {previous-jd-or-cv.txt}` and display the `decision` and `score`. Reuse is allowed only when the recommendation is `reuse` or the user explicitly overrides it; `reuse-with-edits` still requires the listed edits, and `regenerate` requires the normal tailoring flow.
 9. Build an internal recruiter-side risk map from the JD using `modes/heuristics/recruiter-side.md`: likely doubts, matching evidence, and which document section should address each doubt
 10. Rewrite Professional Summary by injecting JD keywords + exit narrative bridge ("Built and sold a business. Now applying systems thinking to [JD domain].")
-11. Select top 3-4 most relevant projects for the job. If `cv.md` carries an Awards / Honors section, populate `awards[]` with the entries that support this role — for an early-career candidate a contest medal or dean's list often outranks a thin project. Omit the key when there is nothing to list and the section disappears entirely; never invent an award to fill it
+11. Select top 3-4 most relevant projects for the job. If `cv.md` carries an Awards / Honors section, populate `awards[]` with the entries that support this role — for an early-career candidate a contest medal or dean's list often outranks a thin project. Omit the key when there is nothing to list and the section disappears entirely; never invent an award to fill it. Same treatment for `references[]`: if `cv.md` carries a References section, copy its referees across as-is (name, role, and a contact ONLY when `cv.md` states one) — a referee's phone number travels in every copy of the CV, so it is never inferred or filled in from elsewhere
 12. Reorder experience bullets by JD relevance and by the risk map: strongest matching evidence first
 13. Build competency grid from JD requirements (6-8 keyword phrases), prioritizing `existing` and `supportedByResume` skills from Step 4 — never a `gap` skill
 14. Inject keywords naturally into existing achievements (NEVER invent)
@@ -151,7 +151,8 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
     "education": "Education",
     "certifications": "Certifications",
     "awards": "Awards & Honors",
-    "skills": "Skills"
+    "skills": "Skills",
+    "references": "References"
   },
   "summary": "Personalized summary with JD keywords injected (honest vs cv.md).",
   "competencies": ["RAG Pipelines", "LLMOps", "Kubernetes & Docker"],
@@ -179,6 +180,9 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
   "skills": [
     { "category": "Languages", "items": "Python, JavaScript, C++" },
     { "category": "Frameworks", "items": ["FastAPI", "React", "PyTorch"] }
+  ],
+  "references": [
+    { "name": "Jane Doe", "role": "IT Director, Acme", "phone": "+33 6 00 00 00 00" }
   ]
 }
 ```
@@ -207,6 +211,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `certifications[]` | object | `title`, `org`, `year`. |
 | `awards[]` | object | `title` (award name), `org` (issuing body, optional), `year` (optional). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Use it for competitive or academic distinctions (olympiad medals, hackathon wins, dean's list) that carry more signal than a thin experience section. |
 | `skills[]` | object | `category` + `items` (comma-separated string or string array). |
+| `references[]` | object | `name`, `role` (title + employer, optional), `phone` or `email` (optional). Optional section — omit the key or pass `[]` and the section disappears. **Copy referees verbatim from `cv.md`'s References section; never invent one, and never guess a contact.** With no contact the line renders "contact on request", which is the right output when the referee has not agreed to have their number circulated in every copy of the CV. |
 
 `build-cv-html.mjs` errors out (non-zero exit) if any template placeholder is left unresolved, so a malformed payload fails loudly instead of shipping a broken CV. Run `node build-cv-html.mjs --test` for a self-test render.
 

@@ -44,6 +44,14 @@ const PATTERNS = {
     education: new RegExp(String.raw`<!--\s+EDUCATION\s+-->[\s\S]*?` + HTML_BOUNDARY),
     certifications: new RegExp(String.raw`<!--\s+CERTIFICATIONS\s+-->[\s\S]*?` + HTML_BOUNDARY),
     awards: new RegExp(String.raw`<!--\s+AWARDS\s+-->[\s\S]*?` + HTML_BOUNDARY),
+    // References is the LAST section in cv-template.html, which is why that
+    // template carries an `<!-- END -->` sentinel after it. Without a marker to
+    // stop at, HTML_BOUNDARY would fall through to `$` and this pattern would
+    // swallow the closing `</div></body></html>` along with the section,
+    // emitting HTML that no longer parses. The sentinel is load-bearing: do not
+    // remove it, and give any future last-position optional section the same
+    // treatment. Pinned by tests/cv-optional-sections.test.mjs.
+    references: new RegExp(String.raw`<!--\s+REFERENCES\s+-->[\s\S]*?` + HTML_BOUNDARY),
   },
   tex: {
     projects: new RegExp(String.raw`%{4,}\s+PROJECTS\s+%{4,}[\s\S]*?` + TEX_BOUNDARY),
@@ -52,7 +60,7 @@ const PATTERNS = {
   },
 };
 
-export const OPTIONAL_SECTIONS = ['projects', 'education', 'certifications', 'awards'];
+export const OPTIONAL_SECTIONS = ['projects', 'education', 'certifications', 'awards', 'references'];
 
 export function isEmptySection(payload, section) {
   const entries = payload?.[section];

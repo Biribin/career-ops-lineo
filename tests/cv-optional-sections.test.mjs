@@ -1,6 +1,7 @@
 // tests/cv-optional-sections.test.mjs — the optional CV sections (projects,
-// education, certifications, awards) must vanish entirely when they have no
-// entries, rather than rendering a bare section header with nothing under it.
+// education, certifications, awards, references) must vanish entirely when they
+// have no entries, rather than rendering a bare section header with nothing
+// under it.
 //
 // #1879 fixed this for projects; education is the same bug (not every
 // candidate has a degree). Certifications was fixed once directly in
@@ -19,12 +20,17 @@ import { stripEmptySections } from '../cv-sections-core.mjs';
 
 console.log('\ncv-sections-core.mjs — optional sections leave no bare header');
 
-const EMPTY = { projects: [], education: [], certifications: [], awards: [] };
+// Every optional section, so `FULL` really means "nothing to strip". A section
+// added to OPTIONAL_SECTIONS without being added here makes the
+// "populated payload leaves the template unchanged" check fail — which is the
+// point: the fixture is the enumeration.
+const EMPTY = { projects: [], education: [], certifications: [], awards: [], references: [] };
 const FULL = {
   projects: [{ name: 'P' }],
   education: [{ degree: 'D' }],
   certifications: [{ title: 'C' }],
   awards: [{ title: 'A' }],
+  references: [{ name: 'R' }],
 };
 
 function check(label, actual, expected) {
@@ -147,3 +153,37 @@ check('an absent projects key is treated as empty',
 let threw = false;
 try { stripEmptySections('x', EMPTY, 'pdf'); } catch { threw = true; }
 check('an unknown template format throws', threw, true);
+
+// --- References (added 2026-08-14) ----------------------------------------
+// References is the only optional section placed LAST in cv-template.html, which
+// makes it the one case where a loose boundary destroys the document instead of
+// merely leaving a bare header: with nothing to stop at, the pattern runs to end
+// of input and takes `</div></body></html>` with it. The template therefore
+// carries an `<!-- END -->` sentinel, and these checks are what keep it there.
+{
+  const template = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
+  const AVEC = { ...FULL, references: [{ name: 'R', role: 'Role' }] };
+  const SANS = { ...FULL, references: [] };
+
+  check('references: the sentinel that bounds the last section is present',
+    template.includes('<!-- END -->'), true);
+
+  const gardee = stripEmptySections(template, AVEC, 'html');
+  check('references: a populated section survives', gardee.includes('<!-- REFERENCES -->'), true);
+
+  const retiree = stripEmptySections(template, SANS, 'html');
+  check('references: an empty section is removed', retiree.includes('<!-- REFERENCES -->'), false);
+  check('references: no bare header is left behind',
+    retiree.includes('{{SECTION_REFERENCES}}'), false);
+  // LE point porteur : le document doit rester du HTML clos.
+  check('references: removing the last section keeps the closing tags',
+    /<\/div>\s*<\/body>\s*<\/html>\s*$/.test(retiree.trim() + '\n'), true);
+  check('references: the section before it survives', retiree.includes('<!-- SKILLS -->'), true);
+
+  // Sans la sentinelle, la meme suppression emporterait la fin du document :
+  // c'est la demonstration de ce qu'elle protege.
+  const sansSentinelle = template.replace('<!-- END -->', '');
+  const casse = stripEmptySections(sansSentinelle, SANS, 'html');
+  check('references: without the sentinel the closing tags would be swallowed',
+    /<\/body>/.test(casse), false);
+}
