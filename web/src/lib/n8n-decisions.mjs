@@ -220,32 +220,71 @@ export function lireFiches(inboxDir) {
 }
 
 /**
- * Lit le journal local des décisions. Une ligne corrompue est ignorée, pas
- * fatale : le journal est append-only et une écriture interrompue ne doit pas
- * rendre tout l'historique illisible.
+ * Lit le journal local des décisions ET rapporte ce qui n'a pas pu être relu.
+ *
+ * POURQUOI CE DÉTAIL EXISTE. `lireJournal` rend une liste vide sur n'importe
+ * quelle panne de lecture. Pour la file « À valider » c'est sans danger — une
+ * fiche dont on ne connaît pas la décision reste AFFICHÉE, donc l'échec se voit.
+ * Pour la file « À déposer » (a-deposer.mjs) c'est l'inverse : sans journal,
+ * aucune candidature n'est « validée », la file paraît vide et la page annonce
+ * « rien à déposer » alors qu'elle n'a rien pu lire. C'est le mensonge que le
+ * reste de ce fichier s'applique à éviter.
+ *
+ * Fichier ABSENT ≠ panne : c'est l'état d'une installation où aucune décision
+ * n'a encore été prise (`ajouterAuJournal` crée le fichier au premier clic), et
+ * une file vide est alors la vérité. Tout le reste — droits, chemin qui est un
+ * dossier, disque — remonte dans `erreur`.
+ *
+ * Une ligne corrompue reste non-fatale (le journal est append-only, une écriture
+ * interrompue ne doit pas rendre tout l'historique illisible), mais elle est
+ * maintenant COMPTÉE au lieu d'être perdue en silence.
+ *
+ * @param {string} journalPath
+ * @returns {{journal: Journal[], erreur: string|null, illisibles: number}}
+ */
+export function lireJournalDetaille(journalPath) {
+  let brut;
+  try {
+    brut = fs.readFileSync(journalPath, "utf8");
+  } catch (e) {
+    const absent = e && typeof e === "object" && e.code === "ENOENT";
+    return {
+      journal: [],
+      erreur: absent ? null : (e instanceof Error ? e.message : "lecture du journal impossible"),
+      illisibles: 0,
+    };
+  }
+  const out = [];
+  let illisibles = 0;
+  for (const ligne of brut.split("\n")) {
+    const t = ligne.trim();
+    if (!t) continue;
+    let j;
+    try {
+      j = JSON.parse(t);
+    } catch {
+      illisibles++;
+      continue;
+    }
+    // Une ligne JSON valide mais qui n'est pas une décision reconnue est tout
+    // aussi perdue pour la suite : elle compte, sinon un `decision` mal écrit
+    // par une future version de n8n disparaîtrait sans un mot.
+    if (j && typeof j.id === "string" && estDecision(j.decision)) out.push(j);
+    else illisibles++;
+  }
+  return { journal: out, erreur: null, illisibles };
+}
+
+/**
+ * Le journal seul — la forme qu'attendent `fichesEnAttente` et /api/decisions.
+ * Un seul lecteur (`lireJournalDetaille`), pour que les deux files ne puissent
+ * pas relire le journal différemment.
  *
  * @param {string} journalPath
  * @returns {Journal[]}
  */
 export function lireJournal(journalPath) {
-  let brut;
-  try {
-    brut = fs.readFileSync(journalPath, "utf8");
-  } catch {
-    return [];
-  }
-  const out = [];
-  for (const ligne of brut.split("\n")) {
-    const t = ligne.trim();
-    if (!t) continue;
-    try {
-      const j = JSON.parse(t);
-      if (j && typeof j.id === "string" && estDecision(j.decision)) out.push(j);
-    } catch {
-      continue;
-    }
-  }
-  return out;
+  return lireJournalDetaille(journalPath).journal;
 }
 
 /**

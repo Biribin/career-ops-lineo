@@ -20,6 +20,7 @@ import {
   fichesEnAttenteDepuis,
   lireFiches,
   lireJournal,
+  lireJournalDetaille,
   porteDisparue,
   argsRefusTracker,
 } from "../../src/lib/n8n-decisions.mjs";
@@ -225,6 +226,52 @@ test("le journal survit à une ligne corrompue et à un fichier absent", () => {
       lu.map((j) => j.id),
       ["ok"],
     );
+  } finally {
+    rmSync(racine, { recursive: true, force: true });
+  }
+});
+
+test("lireJournalDetaille distingue « pas encore de journal » de « journal illisible »", () => {
+  // Ce que ce test protège : la file « À déposer » (a-deposer.mjs) se construit
+  // À PARTIR de ce journal. Sans lui, aucune candidature n'est « validée », la
+  // file paraît vide et la page annoncerait « rien à déposer » alors qu'elle n'a
+  // rien pu lire. Vide par panne doit être distinguable de vide par vérité.
+  const { racine, journal } = bac([], []);
+  try {
+    // Fichier absent : aucune décision n'a encore été prise. PAS une panne — et
+    // une file vide est alors la vérité.
+    const absent = lireJournalDetaille(journal);
+    assert.deepEqual(absent.journal, []);
+    assert.equal(absent.erreur, null);
+    assert.equal(absent.illisibles, 0);
+
+    // Le chemin est un dossier : la lecture échoue vraiment. Doit remonter.
+    mkdirSync(journal, { recursive: true });
+    const casse = lireJournalDetaille(journal);
+    assert.deepEqual(casse.journal, []);
+    assert.ok(casse.erreur, "une panne de lecture doit remonter, pas rendre une liste vide muette");
+    rmSync(journal, { recursive: true, force: true });
+
+    // Lignes que le journal n'a pas su relire : comptées, plus perdues en silence.
+    mkdirSync(join(racine, "data"), { recursive: true });
+    writeFileSync(
+      journal,
+      [
+        JSON.stringify({ id: "ok", decision: "valider", at: "x", n8nStatus: 200 }),
+        "{ ligne tronquée par une écriture interrompue",
+        JSON.stringify({ id: "decision-inconnue", decision: "envoyer", at: "x" }),
+        "",
+      ].join("\n"),
+    );
+    const lu = lireJournalDetaille(journal);
+    assert.deepEqual(
+      lu.journal.map((j) => j.id),
+      ["ok"],
+    );
+    assert.equal(lu.erreur, null);
+    assert.equal(lu.illisibles, 2);
+    // Et l'ancienne signature n'a pas bougé : un seul lecteur pour les deux files.
+    assert.deepEqual(lireJournal(journal), lu.journal);
   } finally {
     rmSync(racine, { recursive: true, force: true });
   }

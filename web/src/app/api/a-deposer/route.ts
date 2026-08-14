@@ -2,7 +2,7 @@ import { canonicalizeStatus } from "@/lib/core/states";
 import { fichesADeposerDepuis } from "@/lib/a-deposer.mjs";
 import { readApplications } from "@/lib/career-ops";
 import { journalPath } from "@/lib/n8n-decisions";
-import { lireJournal } from "@/lib/n8n-decisions.mjs";
+import { lireJournalDetaille } from "@/lib/n8n-decisions.mjs";
 import { lireInbox } from "@/lib/cv-inbox";
 
 export const runtime = "nodejs";
@@ -26,19 +26,18 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const source = await lireInbox();
+  // Les DEUX lectures peuvent échouer en silence, et ici l'échec est invisible :
+  // sans fiches, ou sans journal, la file paraît vide. Chacune est donc remontée
+  // séparément — « je n'ai pas pu lire » n'est pas « il n'y a rien à déposer ».
+  const journal = lireJournalDetaille(journalPath());
 
   return Response.json({
-    fiches: fichesADeposerDepuis(
-      source.fiches,
-      lireJournal(journalPath()),
-      readApplications(),
-      canonicalizeStatus,
-    ),
-    // Repris tel quel de /api/decisions : la vue doit pouvoir dire « je n'ai pas
-    // pu lire », ce qui n'est pas la même chose que « il n'y a rien à déposer ».
+    fiches: fichesADeposerDepuis(source.fiches, journal.journal, readApplications(), canonicalizeStatus),
     mode: source.mode,
     origine: source.origine,
     erreur: source.erreur,
     tronquees: source.tronquees,
+    erreurJournal: journal.erreur,
+    journalIllisibles: journal.illisibles,
   });
 }
