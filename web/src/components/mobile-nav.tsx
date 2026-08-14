@@ -12,6 +12,7 @@ import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
 import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
 import { useJobs } from "@/components/jobs/job-store";
+import { BadgeADeposer } from "@/components/a-deposer/a-deposer-provider";
 
 // Mobile navigation (< md): a glass top bar + a right-side slide-over drawer that
 // mirrors the desktop sidebar (nav + workers + usage + theme). Premium details:
@@ -150,7 +151,7 @@ export function MobileNav() {
         </div>
 
         <nav className="flex flex-col gap-1 px-3">
-          {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
+          {NAV_ITEMS.map(({ href, label, icon: Icon, chip, compteur }) => {
             const active = isActivePath(href, pathname);
             return (
               <Link
@@ -170,6 +171,7 @@ export function MobileNav() {
                     {chip}
                   </span>
                 )}
+                {compteur === "a-deposer" && <BadgeADeposer />}
               </Link>
             );
           })}
