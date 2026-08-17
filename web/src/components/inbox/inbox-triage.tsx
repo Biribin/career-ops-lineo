@@ -9,8 +9,6 @@ import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
-import { ShortlistTray, type ShortItem } from "./shortlist-tray";
-import { cn } from "@/lib/cn";
 
 /**
  * D'où vient une ligne de `data/pipeline.md`. Se déduit de l'URL, seule donnée
@@ -26,15 +24,19 @@ const GROUPES_PROVENANCE = [
   { cle: "forum" as const, libelle: "n8n community", detail: "posts du forum — se répondent par un message" },
 ];
 
-const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
-const CONFIG_KEY = "career-ops:config";
 const BATCH = 20;
 
-// The inbox as a TRIAGE surface: Abundance → Triage → Shortlist → Opt-in Score.
-// Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
-// it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
-// role relevant — order is freshness with a single documented plug point.
+// The inbox as a TRIAGE surface: Abundance → Triage → Opt-in Score.
+// Default is a small fresh batch (never the full wall); free facets + Skip narrow it.
+// 🔴 The shell is agnostic to what makes a role relevant — order is freshness with a
+// single documented plug point.
+//
+// La SÉLECTION (mise de côté + barre du bas + évaluation en lot) a été retirée le
+// 2026-08-14 à la demande de Linéo. Ce qui reste : chaque ligne s'évalue seule
+// (« Lire l'annonce » gratuit, puis évaluation complète depuis son panneau), ou
+// s'écarte. La clé `career-ops:shortlist` peut traîner dans les navigateurs déjà
+// ouverts : plus personne ne la lit.
 export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const { jobs, startJob } = useJobs();
 
@@ -46,30 +48,20 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const [kw, setKw] = useState("");
   const [showAll, setShowAll] = useState(false);
 
-  // persisted triage state + ephemeral selection/undo
-  const [shortlist, setShortlist] = useState<ShortItem[]>([]);
+  // persisted triage state + ephemeral undo
   const [hidden, setHidden] = useState<string[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [undo, setUndo] = useState<{ label: string; fn: () => void } | null>(null);
-  const [hasCli, setHasCli] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     try {
-      const s = localStorage.getItem(SHORTLIST_KEY);
-      if (s) setShortlist(JSON.parse(s));
       const h = localStorage.getItem(HIDDEN_KEY);
       if (h) setHidden(JSON.parse(h));
-      const c = localStorage.getItem(CONFIG_KEY);
-      setHasCli(!!(c && JSON.parse(c).cliId));
     } catch {
       /* ignore */
     }
     setLoaded(true);
   }, []);
-  useEffect(() => {
-    if (loaded) try { localStorage.setItem(SHORTLIST_KEY, JSON.stringify(shortlist)); } catch { /* quota */ }
-  }, [shortlist, loaded]);
   useEffect(() => {
     if (loaded) try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden)); } catch { /* quota */ }
   }, [hidden, loaded]);
@@ -147,57 +139,17 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
 
-  const isShortlisted = (url: string) => shortlist.some((s) => s.url === url);
-
-  const save = (job: InboxJob) => {
-    if (isShortlisted(job.url)) return;
-    setShortlist((s) => [...s, { url: job.url, company: job.company, role: job.role }]);
-  };
   const skip = (job: InboxJob) => {
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
     setUndo({ label: `${job.company} écartée`, fn: () => setHidden((h) => h.filter((u) => u !== job.url)) });
   };
-  const toggleSelect = (url: string) =>
-    setSelected((s) => {
-      const n = new Set(s);
-      if (n.has(url)) n.delete(url);
-      else n.add(url);
-      return n;
-    });
-  const saveSelected = () => {
-    const add = enriched
-      .filter((e) => selected.has(e.job.url) && !isShortlisted(e.job.url))
-      .map((e) => ({ url: e.job.url, company: e.job.company, role: e.job.role }));
-    if (add.length) setShortlist((s) => [...s, ...add]);
-    setSelected(new Set());
-  };
 
-  const estimate = useMemo(() => {
-    const samples = jobs.filter((j) => j.kind === "evaluate" && j.status === "done" && j.cost?.tokens).map((j) => j.cost!);
-    if (!samples.length || shortlist.length === 0) return {};
-    const avgT = samples.reduce((a, c) => a + c.tokens, 0) / samples.length;
-    const usds = samples.filter((s) => s.usd != null).map((s) => s.usd!);
-    const avgUsd = usds.length ? usds.reduce((a, c) => a + c, 0) / usds.length : undefined;
-    return { tokens: Math.round(avgT * shortlist.length), usd: avgUsd != null ? +(avgUsd * shortlist.length).toFixed(2) : undefined };
-  }, [jobs, shortlist.length]);
-
-  // Évaluation complète d'UNE offre, sans passer par la sélection.
-  //
-  // La barre du bas reste le geste normal (un seul passage de jetons pour tout un
-  // lot), mais le pré-filtre était un cul-de-sac : il affiche « à regarder » et ne
-  // proposait aucun geste suivant, alors que c'est précisément le moment où on sait
-  // que ça vaut la dépense. Même `kind` et même `page` que le lot, donc le badge de
-  // note et le rapport arrivent exactement pareil.
+  // Évaluation complète d'UNE offre — désormais le SEUL chemin vers une note.
+  // Elle se déclenche depuis le panneau de « Lire l'annonce », c'est-à-dire au
+  // moment précis où l'on sait que la dépense vaut le coup, et elle reste gatée
+  // par une confirmation explicite dans la ligne : jamais de dépense par surprise.
   const evaluerUneOffre = (job: { url: string; company: string; role: string }) => {
     startJob({ title: `Évaluation · ${job.company}`, subtitle: job.role, kind: "evaluate", input: job.url, page: "/pipeline" });
-  };
-
-  const scoreShortlist = () => {
-    const batchId = `shortlist-${Date.now()}`;
-    for (const it of shortlist) {
-      startJob({ title: `Évaluation · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId });
-    }
-    setShortlist([]); // sent — the rows flip to Scoring… → badge via scoreByUrl
   };
 
   // The parent (PipelineView) renders the rich empty-inbox card; here we always
@@ -205,7 +157,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   if (inbox.length === 0) return null;
 
   return (
-    <div className={cn("mx-auto mt-4 max-w-3xl", shortlist.length > 0 && "pb-28 sm:pb-24")}>
+    <div className="mx-auto mt-4 max-w-3xl">
       <FacetChips
         within={within}
         setWithin={setWithin}
@@ -241,19 +193,6 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         )}
       </div>
 
-      {/* multi-select action bar */}
-      {selected.size > 0 && (
-        <div className="mt-2 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm">
-          <span className="font-medium text-brand tabular-nums">{selected.size} sélectionnée{selected.size === 1 ? "" : "s"}</span>
-          <button type="button" onClick={saveSelected} className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
-            Ajouter à la sélection
-          </button>
-          <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
-            Effacer
-          </button>
-        </div>
-      )}
-
       {visible.length > 0 ? (
         /* Sous-tableaux par PROVENANCE. Ne pas confondre avec `source`, qui
            désigne l'ATS (Workday, Greenhouse…) : ici c'est « d'où vient cette
@@ -279,10 +218,6 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
                       source={e.source}
                       age={e.age}
                       scored={scoreByUrl.get(e.job.url)}
-                      selected={selected.has(e.job.url)}
-                      shortlisted={isShortlisted(e.job.url)}
-                      onToggleSelect={() => toggleSelect(e.job.url)}
-                      onSave={() => save(e.job)}
                       onSkip={() => skip(e.job)}
                       onEvaluationComplete={() => evaluerUneOffre(e.job)}
                     />
@@ -310,14 +245,14 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         </button>
       )}
 
-      {/* empty-shortlist guidance (only once there's nothing saved) */}
-      {shortlist.length === 0 && (
-        <p className="mt-4 text-center text-xs text-faint">Mettez de côté les postes qui valent le coup, puis évaluez-les d&apos;un bloc — une seule dépense de jetons.</p>
-      )}
+      <p className="mt-4 text-center text-xs text-faint">
+        « Lire l&apos;annonce » est gratuit et cherche les exigences bloquantes ; l&apos;évaluation complète, qui donne
+        la note et le rapport, se lance depuis ce panneau.
+      </p>
 
-      {/* undo toast (sits above the tray) */}
+      {/* undo toast */}
       {undo && (
-        <div className={cn("fixed inset-x-0 z-40 flex justify-center px-4", shortlist.length > 0 ? "bottom-24 sm:bottom-24" : "bottom-6")}>
+        <div className="fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
           <div className="inline-flex items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 text-sm shadow-lg">
             <span className="text-muted">{undo.label}</span>
             <button type="button" onClick={() => { undo.fn(); setUndo(null); }} className="inline-flex items-center gap-1 font-medium text-brand max-sm:min-h-[44px]">
@@ -326,15 +261,6 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           </div>
         </div>
       )}
-
-      <ShortlistTray
-        items={shortlist}
-        estimate={estimate}
-        hasCli={hasCli}
-        onRemove={(url) => setShortlist((s) => s.filter((x) => x.url !== url))}
-        onClear={() => setShortlist([])}
-        onScore={scoreShortlist}
-      />
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, Check, Coins, Copy, ExternalLink, Loader2, MessageSquarePlus, ScanSearch, Sparkles, X } from "lucide-react";
+import { Check, Coins, Copy, ExternalLink, Loader2, MessageSquarePlus, ScanSearch, Sparkles, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
@@ -22,17 +22,13 @@ function agoLabel(age: number | null): string | null {
 }
 
 // One raw posting in the triage list. Shows ONLY cheap, free signals + an honest
-// "not scored" (CRUDA) — never a fake match%. Once its shortlist eval finishes it
-// flips to EVALUADA (a real A–F badge). Save→shortlist / Skip→hidden are free + undoable.
+// "not scored" (CRUDA) — never a fake match%. Once its eval finishes it flips to
+// EVALUADA (a real A–F badge). Skip→hidden is free + undoable.
 export function TriageRow({
   job,
   source,
   age,
   scored,
-  selected,
-  shortlisted,
-  onToggleSelect,
-  onSave,
   onSkip,
   onEvaluationComplete,
 }: {
@@ -40,10 +36,6 @@ export function TriageRow({
   source: AtsSource | null;
   age: number | null;
   scored?: RowScore;
-  selected: boolean;
-  shortlisted: boolean;
-  onToggleSelect: () => void;
-  onSave: () => void;
   onSkip: () => void;
   /** Lance la VRAIE évaluation (mode oferta : note, rapport, ligne de tracker),
    *  proposée depuis le panneau du pré-filtre. Le parent la tient parce que c'est
@@ -87,7 +79,8 @@ export function TriageRow({
   const [fit, setFit] = useState<Fit | null>(null);
   const [fitEnCours, setFitEnCours] = useState(false);
   // Armement du bouton « évaluation complète » : premier clic annonce la dépense,
-  // second la déclenche. Même discipline que la barre de sélection.
+  // second la déclenche. C'est le dernier garde-fou anti-dépense-par-surprise
+  // depuis le retrait de la barre de sélection, donc il ne se supprime pas.
   const [arme, setArme] = useState(false);
 
   // ── Générer la candidature (lettre + CV) via le workflow n8n 2 ─────────────
@@ -177,23 +170,8 @@ export function TriageRow({
   }
 
   return (
-    <li
-      className={cn(
-        "flex flex-col gap-2 px-3 py-2.5 transition-colors sm:px-4",
-        selected ? "bg-brand-soft/50" : "hover:bg-surface-hover",
-        evaluated && "opacity-95",
-      )}
-    >
+    <li className={cn("flex flex-col gap-2 px-3 py-2.5 transition-colors hover:bg-surface-hover sm:px-4", evaluated && "opacity-95")}>
       <div className="flex items-center gap-2.5 sm:gap-3">
-        {/* multi-select — power-user batch to shortlist */}
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={onToggleSelect}
-          aria-label={`Sélectionner ${job.company} ${job.role}`}
-          className="size-4 shrink-0 accent-brand max-sm:min-h-[44px] max-sm:min-w-[24px]"
-        />
-
         <CompanyLogo name={job.company} size={20} />
 
         <div className="min-w-0 flex-1">
@@ -288,7 +266,7 @@ export function TriageRow({
             </button>
           )}
 
-          {/* EVALUADA state OU actions save/skip */}
+          {/* EVALUADA state OU l'écart */}
           {evaluated ? (
             <Link href={`/jobs/${scored!.jobId}`} className="flex items-center gap-1.5 text-xs">
               {scored!.running ? (
@@ -301,29 +279,14 @@ export function TriageRow({
               )}
             </Link>
           ) : (
-            <>
-              <button
-                type="button"
-                onClick={onSave}
-                title={shortlisted ? "Dans votre sélection" : "Ajouter à la sélection"}
-                aria-pressed={shortlisted}
-                className={cn(
-                  "inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px] max-sm:min-w-[44px]",
-                  shortlisted ? "text-brand" : "text-muted hover:bg-surface-hover hover:text-brand",
-                )}
-              >
-                {shortlisted ? <BookmarkCheck className="size-4" /> : <Bookmark className="size-4" />}
-                <span className="max-sm:hidden">{shortlisted ? "Ajoutée" : "Garder"}</span>
-              </button>
-              <button
-                type="button"
-                onClick={onSkip}
-                title="Écarter — masquer de la file de tri"
-                className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
-              >
-                <X className="size-4" />
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={onSkip}
+              title="Écarter — masquer de la file de tri"
+              className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
+            >
+              <X className="size-4" />
+            </button>
           )}
         </div>
       </div>
