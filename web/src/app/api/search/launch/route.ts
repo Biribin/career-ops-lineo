@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 //    (responseMode onReceived) et travaille en arrière-plan ; le navigateur ne
 //    reste donc pas suspendu, et la page relit /api/offers ensuite.
 
-const N8N_DEFAUT = "https://n8n.balzac-info.online";
+const N8N_DEFAUT = "https://n8n.aef-solutions.fr";
 const CHEMIN = "/webhook/recherche-emploi";
 
 export async function POST() {

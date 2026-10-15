@@ -22,7 +22,7 @@
 import { MAX_ANNONCE } from "./pipeline-fit.mjs";
 
 export const CHEMIN_WF2 = "/webhook/candidature-generer";
-const N8N_DEFAUT = "https://n8n.balzac-info.online";
+const N8N_DEFAUT = "https://n8n.aef-solutions.fr";
 
 /**
  * L'URL du webhook du workflow 2.

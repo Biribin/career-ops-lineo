@@ -32,7 +32,7 @@ export const dynamic = "force-dynamic";
 
 /** Seul l'hôte n8n connu peut recevoir la décision. */
 function baseN8n(): string {
-  return (process.env.N8N_BASE_URL?.trim() || "https://n8n.balzac-info.online").replace(/\/+$/, "");
+  return (process.env.N8N_BASE_URL?.trim() || "https://n8n.aef-solutions.fr").replace(/\/+$/, "");
 }
 
 const MAX_TEXTE = 500;

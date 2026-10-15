@@ -30,7 +30,7 @@ export const maxDuration = 60;
  * journal. Ce qui part chez n8n vient donc du serveur, pas du navigateur.
  */
 
-const N8N_DEFAUT = "https://n8n.balzac-info.online";
+const N8N_DEFAUT = "https://n8n.aef-solutions.fr";
 const CHEMIN_WF2 = "/webhook/candidature-generer";
 
 const journalPath = cheminJournalOffres;

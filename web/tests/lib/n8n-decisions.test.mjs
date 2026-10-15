@@ -33,7 +33,7 @@ const FICHE = {
   revision: 0,
   poste: "Ingénieur automatisation",
   entreprise: "Acme",
-  decision_url: "https://n8n.balzac-info.online/webhook-waiting/42",
+  decision_url: "https://n8n.aef-solutions.fr/webhook-waiting/42",
 };
 
 // Un bac à sable : un dossier inbox façon repo cv + un chemin de journal.

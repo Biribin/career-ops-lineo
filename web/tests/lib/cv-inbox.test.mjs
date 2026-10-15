@@ -20,7 +20,7 @@ const FICHE = {
   revision: 0,
   entreprise: "Acme",
   poste: "Ingénieur automatisation",
-  decision_url: "https://n8n.balzac-info.online/webhook-waiting/42",
+  decision_url: "https://n8n.aef-solutions.fr/webhook-waiting/42",
 };
 
 const b64 = (o) => Buffer.from(JSON.stringify(o, null, 2), "utf8").toString("base64");
