@@ -1,4 +1,4 @@
-# Cockpit web career-ops — service en ligne (Coolify, career.balzac-info.online).
+# Cockpit web career-ops — service en ligne (Coolify, career.aef-solutions.fr).
 #
 # L'app Next vit dans web/ mais execute les .mjs du repo et lit ses fichiers :
 # l'image contient donc TOUT le repo (code). Les RECORDS (candidatures, decisions,

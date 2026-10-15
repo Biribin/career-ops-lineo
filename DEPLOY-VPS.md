@@ -1,7 +1,7 @@
 # Déploiement de l'app career-ops sur le VPS (Coolify)
 
 But : l'app cockpit en ligne, accessible partout, qui enregistre tout — à côté de
-n8n, sur le même serveur. Domaine cible : **career.balzac-info.online**.
+n8n, sur le même serveur. Domaine cible : **career.aef-solutions.fr**.
 
 ## Ce qui est prêt (dans ce repo)
 
@@ -41,7 +41,7 @@ d'avant-premier-envoi, pas une panne de provisioning.
 | Dockerfile | `Dockerfile.web` |
 | Base directory | `/` (racine du repo) |
 | Port exposé | **3000** |
-| Domaine | `https://career.balzac-info.online` |
+| Domaine | `https://career.aef-solutions.fr` |
 | Volume persistant | monté sur **`/app/data`** (les records) |
 
 ### Variables d'environnement
@@ -246,7 +246,7 @@ done
 C=$(for c in $(docker ps --format '{{.Names}}'); do docker exec "$c" test -f /app/doctor.mjs 2>/dev/null && echo "$c" && break; done)
 docker exec -w /app $C node doctor.mjs                                  # attendu : exit 0
 docker exec -w /app $C node scan-ats-full.mjs --dry-run --ats greenhouse --limit 15 --since 7
-curl -s -X POST https://career.balzac-info.online/api/tailor \
+curl -s -X POST https://career.aef-solutions.fr/api/tailor \
   -H 'Content-Type: application/json' \
   -d '{"jobTitle":"Développeur Full Stack","company":"TestCorp","jobDescription":"TypeScript React Next.js Node.js PostgreSQL Docker n8n"}'
 docker exec -w /app $C node gemini-eval.mjs --file jds/offre-test.txt    # nécessite GEMINI_API_KEY
@@ -287,7 +287,7 @@ d'évaluation utilise `WebFetch`, pas le MCP navigateur.
 
 1. Le dépôt privé `career-ops-lineo` doit être accessible par Coolify (même
    GitHub App / clé de déploiement que pour aef-web).
-2. DNS : `career.balzac-info.online` doit pointer sur le serveur Coolify
+2. DNS : `career.aef-solutions.fr` doit pointer sur le serveur Coolify
    (wildcard `*.balzac-info.online` probablement déjà en place pour aef-web).
 
 ## Étape 3 (après mise en ligne) : relances + tailoring career-ops

@@ -58,7 +58,7 @@ test("une offre trouée ne produit ni undefined ni [object Object]", () => {
 });
 
 test("le webhook visé est celui du workflow 2, base configurable", () => {
-  assert.equal(urlWebhookWf2(undefined), "https://n8n.balzac-info.online/webhook/candidature-generer");
+  assert.equal(urlWebhookWf2(undefined), "https://n8n.aef-solutions.fr/webhook/candidature-generer");
   assert.equal(urlWebhookWf2("https://n8n.exemple.fr/"), "https://n8n.exemple.fr/webhook/candidature-generer");
   assert.equal(urlWebhookWf2("  https://n8n.exemple.fr///  "), "https://n8n.exemple.fr/webhook/candidature-generer");
 });
